@@ -1,33 +1,53 @@
-import { USDT_DECIMALS, USDT_SCALE } from "./usdt";
+import {
+  Long,
+} from "mongodb";
 
-export function parseUsdt(value: string): bigint {
-  if (!/^\d+(\.\d{1,6})?$/.test(value)) {
-    throw new Error("Invalid USDT amount");
+const MIN_INT64 =
+  -9_223_372_036_854_775_808n;
+
+const MAX_INT64 =
+  9_223_372_036_854_775_807n;
+
+export function bigintToLong(
+  value: bigint,
+): Long {
+  if (
+    value < MIN_INT64 ||
+    value > MAX_INT64
+  ) {
+    throw new Error(
+      "El monto excede el rango permitido.",
+    );
   }
 
-  const [whole, fraction = ""] = value.split(".");
-  const paddedFraction = fraction.padEnd(USDT_DECIMALS, "0");
-
-  return BigInt(whole) * USDT_SCALE + BigInt(paddedFraction || "0");
+  return Long.fromString(
+    value.toString(),
+  );
 }
 
-export function formatUsdt(value: bigint): string {
-  const negative = value < 0n;
-  const absolute = negative ? -value : value;
-  const whole = absolute / USDT_SCALE;
-  const fraction = (absolute % USDT_SCALE)
-    .toString()
-    .padStart(USDT_DECIMALS, "0")
-    .replace(/0+$/, "");
+export function longToBigint(
+  value: Long | number,
+): bigint {
+  if (
+    typeof value ===
+    "number"
+  ) {
+    if (
+      !Number.isSafeInteger(
+        value,
+      )
+    ) {
+      throw new Error(
+        "MongoDB devolvió un entero fuera del rango seguro.",
+      );
+    }
 
-  const result = fraction ? `${whole}.${fraction}` : whole.toString();
-  return negative ? `-${result}` : result;
-}
+    return BigInt(
+      value,
+    );
+  }
 
-export function serializeAmount(value: bigint): string {
-  return value.toString();
-}
-
-export function deserializeAmount(value: string): bigint {
-  return BigInt(value);
+  return BigInt(
+    value.toString(),
+  );
 }

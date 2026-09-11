@@ -1,19 +1,100 @@
-export type LedgerEntryType =
+import type {
+  Long,
+  ObjectId,
+} from "mongodb";
+
+import type {
+  WalletAsset,
+} from "@/modules/wallets/wallet.types";
+
+export type LedgerTransactionType =
   | "DEPOSIT"
   | "WITHDRAWAL"
-  | "TRANSFER_IN"
-  | "TRANSFER_OUT"
+  | "INTERNAL_TRANSFER"
   | "FEE"
   | "ADJUSTMENT";
 
-export interface LedgerEntry {
-  id: string;
-  transactionId: string;
-  userId: string;
-  asset: "USDT";
-  type: LedgerEntryType;
-  amount: string;
-  referenceType?: string;
-  referenceId?: string;
-  createdAt: Date;
+export type LedgerTransactionStatus =
+  "POSTED";
+
+export interface LedgerEntryDocument {
+  accountId:
+    ObjectId;
+
+  amount:
+    Long;
+
+  description?:
+    string;
+}
+
+export interface LedgerTransactionDocument {
+  _id?: ObjectId;
+
+  asset:
+    WalletAsset;
+
+  type:
+    LedgerTransactionType;
+
+  status:
+    LedgerTransactionStatus;
+
+  entries:
+    LedgerEntryDocument[];
+
+  idempotencyKey?:
+    string;
+
+  referenceType?:
+    string;
+
+  referenceId?:
+    string;
+
+  metadata?:
+    Record<
+      string,
+      string
+    >;
+
+  createdAt:
+    Date;
+}
+
+export interface CreateLedgerEntry {
+  accountId:
+    string;
+
+  amount:
+    bigint;
+
+  description?:
+    string;
+}
+
+export interface CreateLedgerTransaction {
+  asset:
+    WalletAsset;
+
+  type:
+    LedgerTransactionType;
+
+  entries:
+    CreateLedgerEntry[];
+
+  idempotencyKey?:
+    string;
+
+  referenceType?:
+    string;
+
+  referenceId?:
+    string;
+
+  metadata?:
+    Record<
+      string,
+      string
+    >;
 }
