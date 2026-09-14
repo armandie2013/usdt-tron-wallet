@@ -1,8 +1,4 @@
 import {
-  TronWeb,
-} from "tronweb";
-
-import {
   AppError,
 } from "@/lib/errors/app-error";
 
@@ -34,12 +30,74 @@ import type {
 const DEFAULT_MAX_BLOCKS_PER_CYCLE =
   20;
 
+const MAX_EVENT_PAGES_PER_BLOCK =
+  100;
+
+export interface TronDepositScanResult {
+  initialized:
+    boolean;
+
+  skippedBecauseLocked?:
+    boolean;
+
+  network:
+    TronNetwork;
+
+  latestSolidifiedBlock:
+    number;
+
+  lastProcessedBlock:
+    number;
+
+  blocksProcessed:
+    number;
+
+  eventsFound:
+    number;
+
+  /*
+   * Eventos Transfer que correspondían
+   * a wallets registradas en la plataforma.
+   *
+   * Incluye eventos ya indexados.
+   */
+  eventsObserved:
+    number;
+
+  /*
+   * Eventos nuevos insertados en MongoDB.
+   */
+  eventsIndexed:
+    number;
+
+  /*
+   * Eventos que ya estaban indexados.
+   */
+  eventsAlreadyIndexed:
+    number;
+
+  /*
+   * Eventos descartados porque no pertenecen
+   * a una wallet registrada o no superaron
+   * alguna validación.
+   */
+  eventsIgnored:
+    number;
+
+}
+
 export class TronDepositScannerService {
   private readonly state =
     new TronScannerStateRepository();
 
   private readonly deposits =
     new DepositService();
+
+  /*
+   * ==========================================================
+   * RED
+   * ==========================================================
+   */
 
   private getNetwork():
     TronNetwork {
@@ -51,6 +109,12 @@ export class TronDepositScannerService {
       ? "MAINNET"
       : "NILE";
   }
+
+  /*
+   * ==========================================================
+   * CANTIDAD MÁXIMA DE BLOQUES POR CICLO
+   * ==========================================================
+   */
 
   private getMaxBlocksPerCycle():
     number {
@@ -75,12 +139,26 @@ export class TronDepositScannerService {
     return DEFAULT_MAX_BLOCKS_PER_CYCLE;
   }
 
-  async scanOnce() {
+  /*
+   * ==========================================================
+   * SCAN
+   * ==========================================================
+   */
+
+  async scanOnce():
+    Promise<
+      TronDepositScanResult
+    > {
     const network =
       this.getNetwork();
 
+    /*
+     * Solamente trabajamos hasta bloques
+     * solidificados.
+     */
     const solidBlock =
-      await this.getLatestSolidifiedBlock();
+      await this
+        .getLatestSolidifiedBlock();
 
     let lastProcessed =
       await this.state
@@ -89,14 +167,20 @@ export class TronDepositScannerService {
         );
 
     /*
-     * Primera ejecución.
+     * ========================================================
+     * PRIMERA EJECUCIÓN
+     * ========================================================
      *
-     * Si configuramos manualmente TRON_SCANNER_START_BLOCK,
-     * comenzamos desde allí.
+     * Si TRON_SCANNER_START_BLOCK está configurado:
      *
-     * Si no, arrancamos desde el bloque solidificado actual.
-     * Así no intentamos recorrer toda la historia de Nile/Mainnet.
+     * comenzamos desde ese bloque.
+     *
+     * Si no:
+     *
+     * comenzamos desde el bloque solidificado actual,
+     * evitando recorrer toda la historia de TRON.
      */
+
     if (
       lastProcessed ===
       null
@@ -123,10 +207,11 @@ export class TronDepositScannerService {
           solidBlock;
       }
 
-      await this.state.initialize(
-        network,
-        lastProcessed,
-      );
+      await this.state
+        .initialize(
+          network,
+          lastProcessed,
+        );
 
       return {
         initialized:
@@ -146,10 +231,25 @@ export class TronDepositScannerService {
         eventsFound:
           0,
 
-        depositsCredited:
+        eventsObserved:
+          0,
+
+        eventsIndexed:
+          0,
+
+        eventsAlreadyIndexed:
+          0,
+
+        eventsIgnored:
           0,
       };
     }
+
+    /*
+     * ========================================================
+     * YA ESTAMOS AL DÍA
+     * ========================================================
+     */
 
     if (
       lastProcessed >=
@@ -173,10 +273,28 @@ export class TronDepositScannerService {
         eventsFound:
           0,
 
-        depositsCredited:
+        eventsObserved:
+          0,
+
+        eventsIndexed:
+          0,
+
+        eventsAlreadyIndexed:
+          0,
+
+        eventsIgnored:
           0,
       };
     }
+
+    /*
+     * ========================================================
+     * LOCK
+     * ========================================================
+     *
+     * Evitamos dos scanners procesando simultáneamente
+     * los mismos bloques.
+     */
 
     const lockAcquired =
       await this.state
@@ -184,7 +302,9 @@ export class TronDepositScannerService {
           network,
         );
 
-    if (!lockAcquired) {
+    if (
+      !lockAcquired
+    ) {
       return {
         initialized:
           false,
@@ -206,10 +326,25 @@ export class TronDepositScannerService {
         eventsFound:
           0,
 
-        depositsCredited:
+        eventsObserved:
+          0,
+
+        eventsIndexed:
+          0,
+
+        eventsAlreadyIndexed:
+          0,
+
+        eventsIgnored:
           0,
       };
     }
+
+    /*
+     * ========================================================
+     * CONTADORES
+     * ========================================================
+     */
 
     let blocksProcessed =
       0;
@@ -217,7 +352,16 @@ export class TronDepositScannerService {
     let eventsFound =
       0;
 
-    let depositsCredited =
+    let eventsObserved =
+      0;
+
+    let eventsIndexed =
+      0;
+
+    let eventsAlreadyIndexed =
+      0;
+
+    let eventsIgnored =
       0;
 
     try {
@@ -232,21 +376,36 @@ export class TronDepositScannerService {
             maxBlocks,
         );
 
+      /*
+       * ======================================================
+       * BLOQUES
+       * ======================================================
+       */
+
       for (
         let block =
           lastProcessed +
           1;
+
         block <=
           targetBlock;
+
         block++
       ) {
         const events =
-          await this.getUsdtTransferEventsForBlock(
-            block,
-          );
+          await this
+            .getUsdtTransferEventsForBlock(
+              block,
+            );
 
         eventsFound +=
           events.length;
+
+        /*
+         * ====================================================
+         * EVENTOS DEL BLOQUE
+         * ====================================================
+         */
 
         for (
           const event of
@@ -259,18 +418,67 @@ export class TronDepositScannerService {
                 network,
               );
 
+          /*
+           * Evento relacionado con una wallet registrada.
+           */
           if (
-            result.credited
+            result.observed
           ) {
-            depositsCredited++;
+            eventsObserved++;
+          }
+
+          /*
+           * Evento nuevo realmente insertado.
+           *
+           * processConfirmedTronEvent devuelve reason=null
+           * cuando acaba de indexarlo.
+           */
+          if (
+            result.observed &&
+            result.reason ===
+              null
+          ) {
+            eventsIndexed++;
+          }
+
+          /*
+           * Ya existía en MongoDB.
+           */
+          if (
+            result.reason ===
+            "ALREADY_INDEXED"
+          ) {
+            eventsAlreadyIndexed++;
+          }
+
+          /*
+           * Evento real de TRON pero fuera del universo
+           * que necesitamos indexar.
+           */
+          if (
+            result.ignored
+          ) {
+            eventsIgnored++;
           }
         }
 
         /*
-         * MUY IMPORTANTE:
-         * avanzamos el cursor solamente DESPUÉS
-         * de terminar correctamente el bloque.
+         * ====================================================
+         * CURSOR
+         * ====================================================
+         *
+         * CRÍTICO:
+         *
+         * Solamente avanzamos el cursor DESPUÉS de haber
+         * terminado correctamente TODOS los eventos del bloque.
+         *
+         * Si cualquier consulta o escritura lanza una excepción,
+         * este código no se ejecuta y el próximo ciclo vuelve
+         * a intentar el mismo bloque.
+         *
+         * La idempotencia del DepositRepository evita duplicados.
          */
+
         await this.state
           .updateLastProcessedBlock(
             network,
@@ -279,6 +487,12 @@ export class TronDepositScannerService {
 
         blocksProcessed++;
       }
+
+      /*
+       * ======================================================
+       * RESULTADO
+       * ======================================================
+       */
 
       return {
         initialized:
@@ -300,9 +514,21 @@ export class TronDepositScannerService {
 
         eventsFound,
 
-        depositsCredited,
+        eventsObserved,
+
+        eventsIndexed,
+
+        eventsAlreadyIndexed,
+
+        eventsIgnored,
+
       };
     } finally {
+      /*
+       * El lock siempre debe liberarse,
+       * incluso cuando falle un bloque.
+       */
+
       await this.state
         .releaseLock(
           network,
@@ -310,17 +536,25 @@ export class TronDepositScannerService {
     }
   }
 
+  /*
+   * ==========================================================
+   * ÚLTIMO BLOQUE SOLIDIFICADO
+   * ==========================================================
+   */
+
   private async getLatestSolidifiedBlock():
     Promise<number> {
     const tronWeb =
       TronClient.getInstance();
 
     const response =
-      await tronWeb.solidityNode
+      await tronWeb
+        .solidityNode
         .request<{
           block_header?: {
             raw_data?: {
-              number?: number;
+              number?:
+                number;
             };
           };
         }>(
@@ -330,13 +564,19 @@ export class TronDepositScannerService {
         );
 
     const blockNumber =
-      response.block_header
+      response
+        .block_header
         ?.raw_data
         ?.number;
 
     if (
       typeof blockNumber !==
-      "number"
+        "number" ||
+      !Number.isSafeInteger(
+        blockNumber,
+      ) ||
+      blockNumber <
+        0
     ) {
       throw new AppError(
         "No se pudo determinar el último bloque solidificado de TRON.",
@@ -347,6 +587,22 @@ export class TronDepositScannerService {
 
     return blockNumber;
   }
+
+  /*
+   * ==========================================================
+   * EVENTOS USDT DE UN BLOQUE
+   * ==========================================================
+   *
+   * IMPORTANTE:
+   *
+   * TronGrid pagina los eventos.
+   *
+   * El scanner anterior pedía limit=200 pero no seguía
+   * meta.fingerprint, por lo que un bloque con más de
+   * 200 eventos podía quedar incompleto.
+   *
+   * Ahora recorremos todas las páginas disponibles.
+   */
 
   private async getUsdtTransferEventsForBlock(
     blockNumber:
@@ -359,7 +615,9 @@ export class TronDepositScannerService {
         .TRON_FULL_HOST
         ?.trim();
 
-    if (!fullHost) {
+    if (
+      !fullHost
+    ) {
       throw new AppError(
         "TRON_FULL_HOST no está configurado.",
         "TRON_CONFIGURATION_ERROR",
@@ -370,123 +628,248 @@ export class TronDepositScannerService {
     const contract =
       getUsdtTrc20Contract();
 
-    const url =
-      new URL(
-        `/v1/contracts/${contract}/events`,
-        fullHost,
-      );
+    const events:
+      TronContractTransferEvent[] =
+      [];
 
-    url.searchParams.set(
-      "event_name",
-      "Transfer",
-    );
+    let fingerprint:
+      string |
+      null =
+      null;
 
-    url.searchParams.set(
-      "block_number",
-      blockNumber.toString(),
-    );
+    let page =
+      0;
 
-    url.searchParams.set(
-      "only_confirmed",
-      "true",
-    );
+    /*
+     * Protección adicional para evitar un loop infinito
+     * si TronGrid devolviera fingerprints anómalos.
+     */
+    const seenFingerprints =
+      new Set<string>();
 
-    url.searchParams.set(
-      "limit",
-      "200",
-    );
+    do {
+      page++;
 
-    const apiKey =
-      process.env
-        .TRON_API_KEY
-        ?.trim();
+      if (
+        page >
+        MAX_EVENT_PAGES_PER_BLOCK
+      ) {
+        throw new AppError(
+          `Se superó el máximo de páginas de eventos permitido para el bloque ${blockNumber}.`,
+          "TRON_EVENTS_PAGINATION_LIMIT",
+          502,
+        );
+      }
 
-    const response =
-      await fetch(
-        url,
-        {
-          headers:
-            apiKey
-              ? {
-                  "TRON-PRO-API-KEY":
-                    apiKey,
-                }
-              : undefined,
-
-          cache:
-            "no-store",
-        },
-      );
-
-    if (!response.ok) {
-      const body =
-        await response.text();
-
-      console.error(
-        "[TRON SCANNER EVENTS]",
-        response.status,
-        body,
-      );
-
-      throw new AppError(
-        `No se pudieron consultar eventos TRON del bloque ${blockNumber}.`,
-        "TRON_EVENTS_ERROR",
-        502,
-      );
-    }
-
-    const data =
-      (await response.json()) as
-        TronContractEventsResponse;
-
-    if (
-      data.success !==
-      true
-    ) {
-      throw new AppError(
-        `TronGrid devolvió una respuesta inválida para el bloque ${blockNumber}.`,
-        "TRON_EVENTS_ERROR",
-        502,
-      );
-    }
-
-    return (
-      data.data ??
-      []
-    ).filter(
-      (event) =>
-        event.event_name ===
-          "Transfer" &&
-        event.contract_address ===
-          contract,
-    );
-  }
-
-  static eventAddressToBase58(
-    value:
-      string,
-  ): string {
-    const normalized =
-      value
-        .trim()
-        .toLowerCase()
-        .replace(
-          /^0x/,
-          "",
+      const url =
+        new URL(
+          `/v1/contracts/${contract}/events`,
+          fullHost,
         );
 
-    if (
-      !/^[0-9a-f]{40}$/.test(
-        normalized,
-      )
-    ) {
-      throw new Error(
-        `Dirección TRON de evento inválida: ${value}`,
+      url.searchParams.set(
+        "event_name",
+        "Transfer",
       );
-    }
 
-    return TronWeb.address.fromHex(
-      `41${normalized}`,
+      url.searchParams.set(
+        "block_number",
+        blockNumber
+          .toString(),
+      );
+
+      url.searchParams.set(
+        "only_confirmed",
+        "true",
+      );
+
+      url.searchParams.set(
+        "limit",
+        "200",
+      );
+
+      /*
+       * TronGrid utiliza fingerprint para continuar
+       * desde la página anterior.
+       */
+      if (
+        fingerprint
+      ) {
+        url.searchParams.set(
+          "fingerprint",
+          fingerprint,
+        );
+      }
+
+      const apiKey =
+        process.env
+          .TRON_API_KEY
+          ?.trim();
+
+      const response =
+        await fetch(
+          url,
+          {
+            headers:
+              apiKey
+                ? {
+                    "TRON-PRO-API-KEY":
+                      apiKey,
+                  }
+                : undefined,
+
+            cache:
+              "no-store",
+          },
+        );
+
+      if (
+        !response.ok
+      ) {
+        const body =
+          await response
+            .text();
+
+        console.error(
+          "[TRON SCANNER EVENTS]",
+          {
+            blockNumber,
+            page,
+            status:
+              response.status,
+            body,
+          },
+        );
+
+        throw new AppError(
+          `No se pudieron consultar eventos TRON del bloque ${blockNumber}.`,
+          "TRON_EVENTS_ERROR",
+          502,
+        );
+      }
+
+      let data:
+        TronContractEventsResponse;
+
+      try {
+        data =
+          (
+            await response
+              .json()
+          ) as
+            TronContractEventsResponse;
+      } catch {
+        throw new AppError(
+          `TronGrid devolvió una respuesta que no pudo interpretarse para el bloque ${blockNumber}.`,
+          "TRON_EVENTS_ERROR",
+          502,
+        );
+      }
+
+      if (
+        data.success !==
+        true
+      ) {
+        throw new AppError(
+          `TronGrid devolvió una respuesta inválida para el bloque ${blockNumber}.`,
+          "TRON_EVENTS_ERROR",
+          502,
+        );
+      }
+
+      const pageEvents =
+        Array.isArray(
+          data.data,
+        )
+          ? data.data
+          : [];
+
+      /*
+       * Aunque el endpoint ya está filtrado por contrato
+       * y nombre del evento, volvemos a validar defensivamente.
+       */
+      for (
+        const event of
+        pageEvents
+      ) {
+        if (
+          event.event_name !==
+          "Transfer"
+        ) {
+          continue;
+        }
+
+        if (
+          event
+            .contract_address !==
+          contract
+        ) {
+          continue;
+        }
+
+        /*
+         * Defendemos también que TronGrid realmente
+         * esté respetando block_number.
+         */
+        if (
+          event.block_number !==
+          blockNumber
+        ) {
+          continue;
+        }
+
+        events.push(
+          event,
+        );
+      }
+
+      const nextFingerprint =
+        data.meta
+          ?.fingerprint
+          ?.trim() ||
+        null;
+
+      /*
+       * No hay próxima página.
+       */
+      if (
+        !nextFingerprint
+      ) {
+        fingerprint =
+          null;
+
+        break;
+      }
+
+      /*
+       * Si TronGrid devuelve el mismo fingerprint dos veces
+       * o uno previamente visitado, detenemos con error.
+       *
+       * No avanzamos el cursor del bloque porque la excepción
+       * sube hasta scanOnce().
+       */
+      if (
+        seenFingerprints.has(
+          nextFingerprint,
+        )
+      ) {
+        throw new AppError(
+          `TronGrid devolvió un fingerprint repetido para el bloque ${blockNumber}.`,
+          "TRON_EVENTS_PAGINATION_ERROR",
+          502,
+        );
+      }
+
+      seenFingerprints.add(
+        nextFingerprint,
+      );
+
+      fingerprint =
+        nextFingerprint;
+    } while (
+      fingerprint
     );
+
+    return events;
   }
 }

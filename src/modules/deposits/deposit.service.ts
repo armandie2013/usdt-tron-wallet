@@ -1,6 +1,6 @@
 import {
-  MongoServerError,
-} from "mongodb";
+  TronWeb,
+} from "tronweb";
 
 import {
   AppError,
@@ -11,20 +11,12 @@ import {
 } from "@/lib/money/usdt";
 
 import {
-  LedgerService,
-} from "@/modules/ledger/ledger.service";
-
-import {
-  WalletRepository,
-} from "@/modules/wallets/wallet.repository";
-
-import {
   TronAccountRepository,
 } from "@/modules/blockchain/tron/tron-account.repository";
 
 import {
-  tronEventAddressToBase58,
-} from "@/modules/blockchain/tron/tron-address";
+  TronService,
+} from "@/modules/blockchain/tron/tron.service";
 
 import {
   getUsdtTrc20Contract,
@@ -44,18 +36,109 @@ import type {
   TronGridTrc20Transaction,
 } from "./deposit.types";
 
-export class DepositService {
-  private readonly deposits =
-    new DepositRepository();
+/*
+ * ============================================================
+ * TIPOS
+ * ============================================================
+ */
 
+export interface ObservedDeposit {
+  txid:
+    string;
+
+  eventKey:
+    string;
+
+  fromAddress:
+    string;
+
+  toAddress:
+    string;
+
+  amountUnits:
+    string;
+
+  formattedAmount:
+    string;
+
+  blockTimestamp:
+    string;
+}
+
+export interface SyncUserDepositsResult {
+  address:
+    string;
+
+  network:
+    TronNetwork;
+
+  contract:
+    string;
+
+  found:
+    number;
+
+  ignored:
+    number;
+
+  observedTransfers:
+    ObservedDeposit[];
+
+  balance:
+    string;
+
+  formattedBalance:
+    string;
+
+  source:
+    "TRON";
+}
+
+export interface ProcessConfirmedTronEventResult {
+  /*
+   * true = evento válido perteneciente
+   * a una wallet registrada.
+   */
+  observed:
+    boolean;
+
+  /*
+   * true = el evento no pertenece al
+   * universo que necesitamos indexar.
+   */
+  ignored:
+    boolean;
+
+  reason:
+    string |
+    null;
+
+  txid:
+    string |
+    null;
+}
+
+/*
+ * ============================================================
+ * SERVICIO
+ * ============================================================
+ */
+
+export class DepositService {
   private readonly accounts =
     new TronAccountRepository();
 
-  private readonly wallets =
-    new WalletRepository();
+  private readonly deposits =
+    new DepositRepository();
 
-  private readonly ledger =
-    new LedgerService();
+  private readonly tron =
+    new TronService();
+
+  /*
+   * ==========================================================
+   * RED ACTUAL
+   * ==========================================================
+   */
 
   private getNetwork():
     TronNetwork {
@@ -72,15 +155,680 @@ export class DepositService {
   }
 
   /*
-   * SINCRONIZACIÓN MANUAL LEGACY
+   * ==========================================================
+   * NORMALIZAR DIRECCIÓN TRON
+   * ==========================================================
    *
-   * La mantenemos por ahora como herramienta de desarrollo.
+   * TronGrid puede entregar los argumentos de eventos
+   * en Base58 o en hexadecimal 41...
    *
-   * El scanner central nuevo NO utiliza este método.
+   * Internamente nosotros registramos Base58.
    */
+
+  private normalizeTronAddress(
+    value:
+      string,
+  ): string | null {
+    const normalized =
+      value.trim();
+
+    if (!normalized) {
+      return null;
+    }
+
+    /*
+     * Ya es Base58.
+     */
+    if (
+      normalized.startsWith(
+        "T",
+      ) &&
+      TronWeb.isAddress(
+        normalized,
+      )
+    ) {
+      return normalized;
+    }
+
+    /*
+     * Dirección TRON hexadecimal:
+     *
+     * 41 + 20 bytes
+     * = 42 caracteres hex.
+     */
+    if (
+      /^41[0-9a-fA-F]{40}$/.test(
+        normalized,
+      )
+    ) {
+      try {
+        const base58 =
+          TronWeb.address
+            .fromHex(
+              normalized,
+            );
+
+        if (
+          TronWeb.isAddress(
+            base58,
+          )
+        ) {
+          return base58;
+        }
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  /*
+   * ==========================================================
+   * EVENTO CONFIRMADO DEL SCANNER CENTRAL
+   * ==========================================================
+   *
+   * Este método recibe eventos Transfer del contrato
+   * USDT obtenidos bloque por bloque.
+   *
+   * En el modelo no-custodial:
+   *
+   * - detecta;
+   * - valida;
+   * - relaciona con una dirección registrada;
+   * - indexa en MongoDB;
+   *
+   * PERO:
+   *
+   * - no acredita saldo;
+   * - no crea ledger;
+   * - no crea clearing;
+   * - no firma;
+   * - no mueve fondos.
+   */
+
+  async processConfirmedTronEvent(
+    event:
+      TronContractTransferEvent,
+
+    network:
+      TronNetwork,
+  ): Promise<
+    ProcessConfirmedTronEventResult
+  > {
+    /*
+     * ========================================================
+     * RED
+     * ========================================================
+     */
+
+    if (
+      network !==
+      this.getNetwork()
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "NETWORK_MISMATCH",
+
+        txid:
+          event
+            .transaction_id ||
+          null,
+      };
+    }
+
+    /*
+     * ========================================================
+     * CONTRATO
+     * ========================================================
+     */
+
+    const contract =
+      getUsdtTrc20Contract();
+
+    if (
+      event
+        .contract_address !==
+      contract
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "CONTRACT_MISMATCH",
+
+        txid:
+          event
+            .transaction_id ||
+          null,
+      };
+    }
+
+    /*
+     * ========================================================
+     * EVENTO TRANSFER
+     * ========================================================
+     */
+
+    if (
+      event.event_name !==
+      "Transfer"
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "NOT_TRANSFER",
+
+        txid:
+          event
+            .transaction_id ||
+          null,
+      };
+    }
+
+    /*
+     * TronGrid puede devolver:
+     *
+     * result.from
+     * result.to
+     * result.value
+     *
+     * o:
+     *
+     * result["0"]
+     * result["1"]
+     * result["2"]
+     */
+
+    const rawFromAddress =
+      event
+        .result
+        .from ??
+      event
+        .result["0"];
+
+    const rawToAddress =
+      event
+        .result
+        .to ??
+      event
+        .result["1"];
+
+    const value =
+      event
+        .result
+        .value ??
+      event
+        .result["2"];
+
+    if (
+      !event
+        .transaction_id ||
+      !rawFromAddress ||
+      !rawToAddress ||
+      !value
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "INVALID_EVENT",
+
+        txid:
+          event
+            .transaction_id ||
+          null,
+      };
+    }
+
+    /*
+     * ========================================================
+     * DIRECCIONES
+     * ========================================================
+     */
+
+    const fromAddress =
+      this.normalizeTronAddress(
+        rawFromAddress,
+      );
+
+    const toAddress =
+      this.normalizeTronAddress(
+        rawToAddress,
+      );
+
+    if (
+      !fromAddress ||
+      !toAddress
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "INVALID_ADDRESS",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    /*
+     * ========================================================
+     * IMPORTE
+     * ========================================================
+     */
+
+    if (
+      !/^\d+$/.test(
+        value,
+      )
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "INVALID_AMOUNT",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    let amount:
+      bigint;
+
+    try {
+      amount =
+        BigInt(
+          value,
+        );
+    } catch {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "INVALID_AMOUNT",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    if (
+      amount <=
+      0n
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "INVALID_AMOUNT",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    /*
+     * ========================================================
+     * BLOQUE / EVENT INDEX
+     * ========================================================
+     */
+
+    if (
+      !Number.isSafeInteger(
+        event.block_number,
+      ) ||
+      event.block_number <
+        0
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "INVALID_BLOCK_NUMBER",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    if (
+      !Number.isSafeInteger(
+        event.event_index,
+      ) ||
+      event.event_index <
+        0
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "INVALID_EVENT_INDEX",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    if (
+      !Number.isFinite(
+        event.block_timestamp,
+      ) ||
+      event.block_timestamp <=
+        0
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "INVALID_BLOCK_TIMESTAMP",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    /*
+     * ========================================================
+     * ¿LA DIRECCIÓN RECEPTORA PERTENECE A LA PLATAFORMA?
+     * ========================================================
+     *
+     * Importante:
+     *
+     * findByAddress() solamente trabaja con información
+     * pública del usuario.
+     *
+     * No hay private keys involucradas.
+     */
+
+    const account =
+      await this.accounts
+        .findByAddress(
+          toAddress,
+        );
+
+    if (
+      !account
+    ) {
+      /*
+       * El evento existe realmente en TRON,
+       * pero no pertenece a ninguna wallet
+       * registrada en nuestra aplicación.
+       */
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "UNREGISTERED_RECIPIENT",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    if (
+      account.network !==
+      network
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "ACCOUNT_NETWORK_MISMATCH",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    if (
+      account.status !==
+      "ACTIVE"
+    ) {
+      return {
+
+        observed:
+          false,
+
+        ignored:
+          true,
+
+        reason:
+          "ACCOUNT_DISABLED",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    /*
+     * ========================================================
+     * EVENT KEY
+     * ========================================================
+     *
+     * Para eventos provenientes del scanner de bloques
+     * tenemos el event_index real.
+     *
+     * Por eso la clave puede ser mucho más limpia que
+     * la utilizada por el sincronizador manual.
+     */
+
+    const eventKey =
+      [
+        network,
+        event.transaction_id,
+        event.event_index,
+      ].join(
+        ":",
+      );
+
+    /*
+     * ========================================================
+     * INDEXACIÓN
+     * ========================================================
+     *
+     * Primero podemos verificar rápidamente si ya existe.
+     *
+     * Incluso si dos workers llegan simultáneamente,
+     * DepositRepository tiene índices UNIQUE y tolera
+     * duplicate key 11000.
+     */
+
+    const alreadyIndexed =
+      await this.deposits
+        .existsByBlockchainEvent(
+          network,
+          event.transaction_id,
+          event.event_index,
+        );
+
+    if (
+      alreadyIndexed
+    ) {
+      return {
+
+        observed:
+          true,
+
+        ignored:
+          false,
+
+        reason:
+          "ALREADY_INDEXED",
+
+        txid:
+          event
+            .transaction_id,
+      };
+    }
+
+    /*
+     * MongoDB guarda solamente metadata/index.
+     *
+     * El saldo NO sale de esta colección.
+     */
+
+    await this.deposits
+      .saveObservedDeposit({
+        userId:
+          account.userId
+            .toString(),
+
+        network,
+
+        contractAddress:
+          contract,
+
+        txid:
+          event.transaction_id,
+
+        eventIndex:
+          event.event_index,
+
+        eventKey,
+
+        blockNumber:
+          event.block_number,
+
+        fromAddress,
+
+        toAddress,
+
+        amountUnits:
+          amount,
+
+        blockTimestamp:
+          new Date(
+            event.block_timestamp,
+          ),
+      });
+
+    /*
+     * ========================================================
+     * RESULTADO
+     * ========================================================
+     *
+     * observed = true:
+     *
+     * el evento pertenece a una wallet conocida
+     * y quedó indexado.
+     */
+
+    return {
+
+      observed:
+        true,
+
+      ignored:
+        false,
+
+      reason:
+        null,
+
+      txid:
+        event
+          .transaction_id,
+    };
+  }
+
+  /*
+   * ==========================================================
+   * SINCRONIZACIÓN MANUAL POR USUARIO
+   * ==========================================================
+   *
+   * Se conserva temporalmente porque todavía existe
+   * deposit.worker.ts y /sync-deposits.
+   *
+   * Este flujo solamente consulta.
+   *
+   * No genera saldo.
+   */
+
   async syncUserDeposits(
-    userId: string,
-  ) {
+    userId:
+      string,
+  ): Promise<
+    SyncUserDepositsResult
+  > {
     const network =
       this.getNetwork();
 
@@ -92,8 +840,7 @@ export class DepositService {
         );
 
     if (
-      !tronAccount ||
-      !tronAccount._id
+      !tronAccount
     ) {
       throw new AppError(
         "El usuario no posee una dirección TRON.",
@@ -102,64 +849,40 @@ export class DepositService {
       );
     }
 
-    const wallet =
-      await this.wallets
-        .getOrCreateUserWallet(
-          userId,
-          "USDT",
-        );
-
-    if (!wallet._id) {
+    if (
+      tronAccount.status !==
+      "ACTIVE"
+    ) {
       throw new AppError(
-        "La wallet del usuario no posee un identificador válido.",
-        "INVALID_WALLET_ACCOUNT",
-        500,
+        "La wallet TRON del usuario no está activa.",
+        "TRON_ACCOUNT_DISABLED",
+        409,
       );
     }
 
-    const clearingWallet =
-      await this.wallets
-        .getOrCreateSystemWallet(
-          "EXTERNAL_CLEARING",
-          "USDT",
-        );
-
-    if (!clearingWallet._id) {
-      throw new AppError(
-        "No se pudo obtener la cuenta contable de compensación.",
-        "INVALID_CLEARING_WALLET",
-        500,
-      );
-    }
+    const address =
+      tronAccount
+        .addressBase58;
 
     const contract =
       getUsdtTrc20Contract();
 
     const transactions =
-      await this.fetchIncomingTransfers(
-        tronAccount.addressBase58,
-        contract,
-      );
+      await this
+        .fetchIncomingTransfers(
+          address,
+          contract,
+        );
 
     let found =
-      0;
-
-    let credited =
-      0;
-
-    let alreadyProcessed =
       0;
 
     let ignored =
       0;
 
-    const creditedDeposits:
-      Array<{
-        txid: string;
-        from: string;
-        amount: string;
-        formattedAmount: string;
-      }> = [];
+    const observedTransfers:
+      ObservedDeposit[] =
+      [];
 
     for (
       const transaction of
@@ -175,14 +898,15 @@ export class DepositService {
 
       if (
         transaction.to !==
-        tronAccount.addressBase58
+        address
       ) {
         ignored++;
         continue;
       }
 
       if (
-        transaction.token_info
+        transaction
+          .token_info
           ?.address !==
         contract
       ) {
@@ -191,9 +915,20 @@ export class DepositService {
       }
 
       if (
-        transaction.token_info
+        transaction
+          .token_info
           ?.decimals !==
         6
+      ) {
+        ignored++;
+        continue;
+      }
+
+      if (
+        !transaction
+          .transaction_id ||
+        !transaction.from ||
+        !transaction.to
       ) {
         ignored++;
         continue;
@@ -208,13 +943,35 @@ export class DepositService {
         continue;
       }
 
-      const amount =
-        BigInt(
-          transaction.value,
-        );
+      let amount:
+        bigint;
+
+      try {
+        amount =
+          BigInt(
+            transaction.value,
+          );
+      } catch {
+        ignored++;
+        continue;
+      }
 
       if (
-        amount <= 0n
+        amount <=
+        0n
+      ) {
+        ignored++;
+        continue;
+      }
+
+      if (
+        !Number.isFinite(
+          transaction
+            .block_timestamp,
+        ) ||
+        transaction
+          .block_timestamp <=
+          0
       ) {
         ignored++;
         continue;
@@ -223,186 +980,71 @@ export class DepositService {
       found++;
 
       /*
-       * Este endpoint viejo no devuelve eventIndex.
+       * El endpoint TRC20 por cuenta no devuelve
+       * event_index.
        *
-       * Se conserva una eventKey determinista
-       * únicamente para compatibilidad.
+       * Esta clave solamente sirve para la vista
+       * temporal del sincronizador manual.
        */
+
       const eventKey =
         [
-          "legacy",
           network,
-          transaction.transaction_id,
+          transaction
+            .transaction_id,
           transaction.from,
           transaction.to,
           transaction.value,
-          transaction.block_timestamp,
-        ].join(":");
+          transaction
+            .block_timestamp,
+        ].join(
+          ":",
+        );
 
-      const exists =
-        await this.deposits
-          .existsByEventKey(
-            eventKey,
-          );
+      observedTransfers.push({
+        txid:
+          transaction
+            .transaction_id,
 
-      if (exists) {
-        alreadyProcessed++;
-        continue;
-      }
+        eventKey,
 
-      const idempotencyKey =
-        `tron-deposit:${eventKey}`;
+        fromAddress:
+          transaction.from,
 
-      try {
-        const ledgerTransaction =
-          await this.ledger.post({
-            asset:
-              "USDT",
+        toAddress:
+          transaction.to,
 
-            type:
-              "DEPOSIT",
+        amountUnits:
+          amount
+            .toString(),
 
-            idempotencyKey,
+        formattedAmount:
+          formatUsdtDisplay(
+            amount,
+          ),
 
-            referenceType:
-              "TRON_TRC20_DEPOSIT",
-
-            referenceId:
-              transaction.transaction_id,
-
-            metadata: {
-              network,
-
-              source:
-                "LEGACY_MANUAL_SYNC",
-
-              txid:
-                transaction.transaction_id,
-
-              from:
-                transaction.from,
-
-              to:
-                transaction.to,
-
-              contract,
-            },
-
-            entries: [
-              {
-                accountId:
-                  wallet._id.toString(),
-
-                amount,
-
-                description:
-                  "Depósito USDT TRC20 confirmado",
-              },
-
-              {
-                accountId:
-                  clearingWallet._id.toString(),
-
-                amount:
-                  -amount,
-
-                description:
-                  "Contrapartida depósito USDT TRC20",
-              },
-            ],
-          });
-
-        /*
-         * eventIndex = -1 y blockNumber = 0
-         * identifican documentos históricos provenientes
-         * del sincronizador manual anterior.
-         *
-         * El scanner central utilizará eventIndex real.
-         */
-        await this.deposits
-          .saveCreditedDeposit({
-            userId,
-
-            walletAccountId:
-              wallet._id.toString(),
-
-            network,
-
-            contractAddress:
-              contract,
-
-            txid:
-              transaction.transaction_id,
-
-            eventIndex:
-              -1,
-
-            eventKey,
-
-            blockNumber:
-              0,
-
-            fromAddress:
-              transaction.from,
-
-            toAddress:
-              transaction.to,
-
-            amountUnits:
-              amount,
-
-            blockTimestamp:
-              new Date(
-                transaction.block_timestamp,
-              ),
-
-            ledgerTransactionId:
-              ledgerTransaction._id
-                ?.toString(),
-          });
-
-        credited++;
-
-        creditedDeposits.push({
-          txid:
-            transaction.transaction_id,
-
-          from:
-            transaction.from,
-
-          amount:
-            amount.toString(),
-
-          formattedAmount:
-            formatUsdtDisplay(
-              amount,
-            ),
-        });
-      } catch (error) {
-        if (
-          error instanceof
-            MongoServerError &&
-          error.code ===
-            11000
-        ) {
-          alreadyProcessed++;
-
-          continue;
-        }
-
-        throw error;
-      }
+        blockTimestamp:
+          new Date(
+            transaction
+              .block_timestamp,
+          ).toISOString(),
+      });
     }
 
-    const balance =
-      await this.ledger
-        .getBalance(
-          wallet._id.toString(),
+    /*
+     * ========================================================
+     * SALDO REAL
+     * ========================================================
+     */
+
+    const onChainBalance =
+      await this.tron
+        .getUsdtBalance(
+          address,
         );
 
     return {
-      address:
-        tronAccount.addressBase58,
+      address,
 
       network,
 
@@ -410,418 +1052,35 @@ export class DepositService {
 
       found,
 
-      credited,
-
-      alreadyProcessed,
-
       ignored,
 
-      creditedDeposits,
+      observedTransfers,
 
       balance:
-        balance.toString(),
+        onChainBalance
+          .balanceUnits,
 
       formattedBalance:
-        formatUsdtDisplay(
-          balance,
-        ),
+        onChainBalance
+          .formattedBalance,
+
+      source:
+        "TRON",
     };
   }
 
   /*
-   * NUEVO SCANNER CENTRAL
-   *
-   * Procesa un evento Transfer ya confirmado
-   * detectado directamente en el contrato USDT.
+   * ==========================================================
+   * HISTORIAL TRC20 ENTRANTE
+   * ==========================================================
    */
-  async processConfirmedTronEvent(
-    event:
-      TronContractTransferEvent,
 
-    network:
-      TronNetwork,
-  ): Promise<{
-    matched: boolean;
-    credited: boolean;
-    alreadyProcessed: boolean;
-  }> {
-    if (
-      event.event_name !==
-      "Transfer"
-    ) {
-      return {
-        matched: false,
-        credited: false,
-        alreadyProcessed: false,
-      };
-    }
-
-    if (
-      !Number.isInteger(
-        event.event_index,
-      ) ||
-      event.event_index < 0
-    ) {
-      console.warn(
-        "[TRON DEPOSIT] Evento sin event_index válido:",
-        event.transaction_id,
-      );
-
-      return {
-        matched: false,
-        credited: false,
-        alreadyProcessed: false,
-      };
-    }
-
-    if (
-      !Number.isInteger(
-        event.block_number,
-      ) ||
-      event.block_number < 0
-    ) {
-      console.warn(
-        "[TRON DEPOSIT] Evento sin block_number válido:",
-        event.transaction_id,
-      );
-
-      return {
-        matched: false,
-        credited: false,
-        alreadyProcessed: false,
-      };
-    }
-
-    const fromRaw =
-      event.result.from ??
-      event.result["0"];
-
-    const toRaw =
-      event.result.to ??
-      event.result["1"];
-
-    const valueRaw =
-      event.result.value ??
-      event.result["2"];
-
-    if (
-      !fromRaw ||
-      !toRaw ||
-      !valueRaw
-    ) {
-      return {
-        matched: false,
-        credited: false,
-        alreadyProcessed: false,
-      };
-    }
-
-    if (
-      !/^\d+$/.test(
-        valueRaw,
-      )
-    ) {
-      console.warn(
-        "[TRON DEPOSIT] Valor inválido:",
-        event.transaction_id,
-        valueRaw,
-      );
-
-      return {
-        matched: false,
-        credited: false,
-        alreadyProcessed: false,
-      };
-    }
-
-    let fromAddress:
-      string;
-
-    let toAddress:
-      string;
-
-    try {
-      fromAddress =
-        tronEventAddressToBase58(
-          fromRaw,
-        );
-
-      toAddress =
-        tronEventAddressToBase58(
-          toRaw,
-        );
-    } catch (error) {
-      console.error(
-        "[TRON DEPOSIT] Error convirtiendo dirección:",
-        error,
-      );
-
-      return {
-        matched: false,
-        credited: false,
-        alreadyProcessed: false,
-      };
-    }
-
-    /*
-     * Acá está la diferencia fundamental
-     * respecto del worker viejo.
-     *
-     * No recorremos usuarios.
-     *
-     * MongoDB busca directamente por el índice:
-     *
-     * addressBase58 → usuario
-     */
-    const tronAccount =
-      await this.accounts
-        .findByAddress(
-          toAddress,
-        );
-
-    if (
-      !tronAccount ||
-      !tronAccount._id
-    ) {
-      return {
-        matched: false,
-        credited: false,
-        alreadyProcessed: false,
-      };
-    }
-
-    if (
-      tronAccount.network !==
-      network
-    ) {
-      return {
-        matched: false,
-        credited: false,
-        alreadyProcessed: false,
-      };
-    }
-
-    const alreadyExists =
-      await this.deposits
-        .existsByBlockchainEvent(
-          network,
-          event.transaction_id,
-          event.event_index,
-        );
-
-    if (alreadyExists) {
-      return {
-        matched: true,
-        credited: false,
-        alreadyProcessed: true,
-      };
-    }
-
-    const amount =
-      BigInt(
-        valueRaw,
-      );
-
-    if (
-      amount <= 0n
-    ) {
-      return {
-        matched: false,
-        credited: false,
-        alreadyProcessed: false,
-      };
-    }
-
-    const userId =
-      tronAccount.userId
-        .toString();
-
-    const wallet =
-      await this.wallets
-        .getOrCreateUserWallet(
-          userId,
-          "USDT",
-        );
-
-    const clearingWallet =
-      await this.wallets
-        .getOrCreateSystemWallet(
-          "EXTERNAL_CLEARING",
-          "USDT",
-        );
-
-    if (
-      !wallet._id ||
-      !clearingWallet._id
-    ) {
-      throw new AppError(
-        "No se pudieron obtener las cuentas contables del depósito.",
-        "INVALID_WALLET_ACCOUNT",
-        500,
-      );
-    }
-
-    const eventKey =
-      `${network}:${event.transaction_id}:${event.event_index}`;
-
-    const idempotencyKey =
-      `tron-deposit:${eventKey}`;
-
-    const contract =
-      getUsdtTrc20Contract();
-
-    try {
-      const ledgerTransaction =
-        await this.ledger.post({
-          asset:
-            "USDT",
-
-          type:
-            "DEPOSIT",
-
-          idempotencyKey,
-
-          referenceType:
-            "TRON_TRC20_DEPOSIT",
-
-          referenceId:
-            event.transaction_id,
-
-          metadata: {
-            network,
-
-            source:
-              "CENTRAL_SCANNER",
-
-            txid:
-              event.transaction_id,
-
-            eventIndex:
-              event.event_index.toString(),
-
-            blockNumber:
-              event.block_number.toString(),
-
-            from:
-              fromAddress,
-
-            to:
-              toAddress,
-
-            contract,
-          },
-
-          entries: [
-            {
-              accountId:
-                wallet._id.toString(),
-
-              amount,
-
-              description:
-                "Depósito USDT TRC20 confirmado",
-            },
-
-            {
-              accountId:
-                clearingWallet._id.toString(),
-
-              amount:
-                -amount,
-
-              description:
-                "Contrapartida depósito USDT TRC20",
-            },
-          ],
-        });
-
-      await this.deposits
-        .saveCreditedDeposit({
-          userId,
-
-          walletAccountId:
-            wallet._id.toString(),
-
-          network,
-
-          contractAddress:
-            contract,
-
-          txid:
-            event.transaction_id,
-
-          eventIndex:
-            event.event_index,
-
-          eventKey,
-
-          blockNumber:
-            event.block_number,
-
-          fromAddress,
-
-          toAddress,
-
-          amountUnits:
-            amount,
-
-          blockTimestamp:
-            new Date(
-              event.block_timestamp,
-            ),
-
-          ledgerTransactionId:
-            ledgerTransaction._id
-              ?.toString(),
-        });
-
-      console.log(
-        `[TRON DEPOSIT] ${formatUsdtDisplay(
-          amount,
-        )} USDT | ${toAddress} | TX ${event.transaction_id}:${event.event_index}`,
-      );
-
-      return {
-        matched: true,
-        credited: true,
-        alreadyProcessed: false,
-      };
-    } catch (error) {
-      /*
-       * Segunda capa de idempotencia.
-       *
-       * Si dos procesos llegaran simultáneamente,
-       * el índice UNIQUE evita duplicar el movimiento.
-       */
-      if (
-        error instanceof
-          MongoServerError &&
-        error.code ===
-          11000
-      ) {
-        console.log(
-          `[TRON DEPOSIT] Ya procesado | ${event.transaction_id}:${event.event_index}`,
-        );
-
-        return {
-          matched: true,
-          credited: false,
-          alreadyProcessed: true,
-        };
-      }
-
-      throw error;
-    }
-  }
-
-  /*
-   * SINCRONIZADOR MANUAL ANTIGUO
-   *
-   * Solo para desarrollo / diagnóstico.
-   */
   private async fetchIncomingTransfers(
-    address: string,
-    contract: string,
+    address:
+      string,
+
+    contract:
+      string,
   ): Promise<
     TronGridTrc20Transaction[]
   > {
@@ -830,7 +1089,9 @@ export class DepositService {
         .TRON_FULL_HOST
         ?.trim();
 
-    if (!fullHost) {
+    if (
+      !fullHost
+    ) {
       throw new AppError(
         "TRON_FULL_HOST no está configurado.",
         "TRON_CONFIGURATION_ERROR",
@@ -878,7 +1139,8 @@ export class DepositService {
       await fetch(
         url,
         {
-          method: "GET",
+          method:
+            "GET",
 
           headers:
             apiKey
@@ -893,9 +1155,12 @@ export class DepositService {
         },
       );
 
-    if (!response.ok) {
+    if (
+      !response.ok
+    ) {
       const body =
-        await response.text();
+        await response
+          .text();
 
       console.error(
         "[TRON TRC20 HISTORY]",
@@ -910,9 +1175,23 @@ export class DepositService {
       );
     }
 
-    const data =
-      (await response.json()) as
-        TronGridTrc20Response;
+    let data:
+      TronGridTrc20Response;
+
+    try {
+      data =
+        (
+          await response
+            .json()
+        ) as
+          TronGridTrc20Response;
+    } catch {
+      throw new AppError(
+        "TronGrid devolvió una respuesta que no pudo interpretarse.",
+        "TRON_TRC20_HISTORY_ERROR",
+        502,
+      );
+    }
 
     if (
       data.success !==
@@ -925,7 +1204,14 @@ export class DepositService {
       );
     }
 
-    return data.data ??
-      [];
+    if (
+      !Array.isArray(
+        data.data,
+      )
+    ) {
+      return [];
+    }
+
+    return data.data;
   }
 }

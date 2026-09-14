@@ -1,24 +1,10 @@
-import QRCode from "qrcode";
-
-import {
-  TronWeb,
-} from "tronweb";
-
 import {
   AppError,
 } from "@/lib/errors/app-error";
 
 import {
-  encryptValue,
-} from "@/lib/crypto/encryption";
-
-import {
   formatUsdtDisplay,
 } from "@/lib/money/usdt";
-
-import {
-  WalletRepository,
-} from "@/modules/wallets/wallet.repository";
 
 import {
   TronAccountRepository,
@@ -28,209 +14,446 @@ import {
   TronClient,
 } from "./tron.client";
 
+import type {
+  CreateTronAccountInput,
+  TronAccountDocument,
+  TronNetwork,
+  TronResourceStatus,
+  TronTrxBalance,
+  TronUsdtBalance,
+  TronWalletStatus,
+} from "./tron.types";
+
 import {
   getUsdtTrc20Contract,
 } from "./usdt.contract";
 
-import type {
-  PublicTronAccount,
-  TronAccountDocument,
-  TronBlockchainStatus,
-  TronNetwork,
-} from "./tron.types";
+/*
+ * ============================================================
+ * TIPOS INTERNOS
+ * ============================================================
+ */
 
-const TRX_SCALE =
-  1_000_000n;
+interface TronAccountResources {
+  EnergyLimit?:
+    number;
+
+  EnergyUsed?:
+    number;
+
+  freeNetLimit?:
+    number;
+
+  freeNetUsed?:
+    number;
+
+  NetLimit?:
+    number;
+
+  NetUsed?:
+    number;
+}
+
+/*
+ * ============================================================
+ * TRON SERVICE
+ * ============================================================
+ *
+ * IMPORTANTE:
+ *
+ * Este servicio NO:
+ *
+ * - genera private keys;
+ * - genera mnemonic;
+ * - cifra private keys;
+ * - descifra private keys;
+ * - firma transacciones;
+ *
+ * Las wallets de usuario ahora son NO-CUSTODIAL.
+ *
+ * El backend solamente:
+ *
+ * - registra direcciones públicas;
+ * - consulta direcciones;
+ * - consulta saldo USDT;
+ * - consulta saldo TRX;
+ * - consulta Energy/Bandwidth;
+ * - expone datos públicos de blockchain.
+ */
 
 export class TronService {
   private readonly accounts =
     new TronAccountRepository();
 
-  private readonly wallets =
-    new WalletRepository();
+  /*
+   * ========================================================
+   * NETWORK
+   * ========================================================
+   */
 
-  private getNetwork():
+  getNetwork():
     TronNetwork {
-    const network =
+    const value =
       process.env
         .TRON_NETWORK
         ?.trim()
         .toLowerCase();
 
-    if (
-      network ===
+    return value ===
       "mainnet"
+      ? "MAINNET"
+      : "NILE";
+  }
+
+  /*
+   * ========================================================
+   * OBTENER CUENTA DEL USUARIO
+   * ========================================================
+   */
+
+  async getAccountForUser(
+    userId:
+      string,
+  ): Promise<
+    TronAccountDocument |
+    null
+  > {
+    const network =
+      this.getNetwork();
+
+    return this.accounts
+      .findByUserId(
+        userId,
+        network,
+      );
+  }
+
+  /*
+   * ========================================================
+   * REGISTRAR DIRECCIÓN PÚBLICA
+   * ========================================================
+   *
+   * La wallet debe haberse generado previamente
+   * del lado del cliente.
+   *
+   * Nunca aceptamos:
+   *
+   * - privateKey
+   * - mnemonic
+   * - encryptedPrivateKey
+   */
+
+  async registerAddress(
+    input: {
+      userId:
+        string;
+
+      addressBase58:
+        string;
+
+      addressHex:
+        string;
+    },
+  ): Promise<
+    TronAccountDocument
+  > {
+    const network =
+      this.getNetwork();
+
+    const addressBase58 =
+      input.addressBase58
+        .trim();
+
+    const addressHex =
+      input.addressHex
+        .trim()
+        .replace(
+          /^0x/i,
+          "",
+        )
+        .toUpperCase();
+
+    if (
+      !addressBase58
     ) {
-      return "MAINNET";
-    }
-
-    return "NILE";
-  }
-
-  async getOrCreateAccountForUser(
-    userId: string,
-  ): Promise<
-    PublicTronAccount
-  > {
-    const network =
-      this.getNetwork();
-
-    let account =
-      await this.accounts
-        .findByUserId(
-          userId,
-          network,
-        );
-
-    if (!account) {
-      account =
-        await this.createAccountForUser(
-          userId,
-          network,
-        );
-    }
-
-    return this.toPublicAccount(
-      account,
-    );
-  }
-
-  async getBlockchainStatusForUser(
-    userId: string,
-  ): Promise<
-    TronBlockchainStatus
-  > {
-    const network =
-      this.getNetwork();
-
-    const account =
-      await this.accounts
-        .findByUserId(
-          userId,
-          network,
-        );
-
-    if (!account) {
       throw new AppError(
-        "El usuario todavía no posee una dirección TRON.",
-        "TRON_ACCOUNT_NOT_FOUND",
-        404,
+        "La dirección TRON es obligatoria.",
+        "TRON_ADDRESS_REQUIRED",
+        400,
       );
     }
 
-    const tronWeb =
-      TronClient.getInstance();
-
-    const address =
-      account.addressBase58;
-
     /*
-     * TronWeb necesita una dirección por defecto
-     * para algunas llamadas constantes a contratos.
-     *
-     * No estamos firmando nada ni cargando la private key.
-     * Solo establecemos la dirección pública del usuario.
+     * Validamos Base58 usando TronWeb.
      */
-    tronWeb.setAddress(
-      address,
-    );
-
-    /*
-     * ESTADO DE ACTIVACIÓN
-     */
-    let activated =
+    let validAddress =
       false;
 
     try {
-      const accountInfo =
-        await tronWeb.trx
-          .getAccount(
-            address,
-          );
+      const tronWeb =
+        TronClient.create();
 
-      activated =
-        Boolean(
-          accountInfo &&
-          typeof accountInfo ===
-            "object" &&
-          Object.keys(
-            accountInfo,
-          ).length > 0 &&
-          "address" in
-            accountInfo,
+      validAddress =
+        tronWeb.isAddress(
+          addressBase58,
         );
-    } catch (error) {
-      console.error(
-        "[TRON ACCOUNT STATUS]",
-        error,
-      );
-
-      activated =
+    } catch {
+      validAddress =
         false;
     }
 
-    /*
-     * SALDO TRX
-     *
-     * TronWeb devuelve SUN.
-     */
-    let trxBalanceSun =
-      0n;
-
-    try {
-      const rawBalance =
-        await tronWeb.trx
-          .getBalance(
-            address,
-          );
-
-      if (
-        !Number.isSafeInteger(
-          rawBalance,
-        )
-      ) {
-        throw new Error(
-          "El saldo TRX recibido excede el rango seguro de JavaScript.",
-        );
-      }
-
-      trxBalanceSun =
-        BigInt(
-          rawBalance,
-        );
-    } catch (error) {
-      console.error(
-        "[TRON TRX BALANCE]",
-        error,
+    if (
+      !validAddress
+    ) {
+      throw new AppError(
+        "La dirección TRON no es válida.",
+        "TRON_ADDRESS_INVALID",
+        400,
       );
-
-      if (activated) {
-        throw new AppError(
-          "No se pudo consultar el saldo TRX en TRON.",
-          "TRON_TRX_BALANCE_ERROR",
-          502,
-        );
-      }
-
-      trxBalanceSun =
-        0n;
     }
 
     /*
-     * SALDO USDT TRC20
+     * Dirección hexadecimal TRON:
+     *
+     * 41 + 20 bytes de address
      */
-    const usdtContract =
-      getUsdtTrc20Contract();
+    if (
+      !/^41[0-9A-F]{40}$/.test(
+        addressHex,
+      )
+    ) {
+      throw new AppError(
+        "La dirección TRON hexadecimal no es válida.",
+        "TRON_HEX_ADDRESS_INVALID",
+        400,
+      );
+    }
 
-    let usdtBalanceUnits =
-      0n;
+    /*
+     * Verificamos que Base58 y HEX representen
+     * exactamente la misma dirección.
+     */
+    const tronWeb =
+      TronClient.create();
+
+    let derivedHex:
+      string;
+
+    try {
+      derivedHex =
+        tronWeb.address
+          .toHex(
+            addressBase58,
+          )
+          .replace(
+            /^0x/i,
+            "",
+          )
+          .toUpperCase();
+    } catch {
+      throw new AppError(
+        "No se pudo convertir la dirección TRON.",
+        "TRON_ADDRESS_CONVERSION_ERROR",
+        400,
+      );
+    }
+
+    if (
+      derivedHex !==
+      addressHex
+    ) {
+      throw new AppError(
+        "La dirección Base58 y la dirección hexadecimal no corresponden a la misma wallet.",
+        "TRON_ADDRESS_MISMATCH",
+        400,
+      );
+    }
+
+    const existing =
+      await this.accounts
+        .findByUserId(
+          input.userId,
+          network,
+        );
+
+    /*
+     * Registro idempotente.
+     */
+    if (
+      existing
+    ) {
+      if (
+        existing.addressBase58 ===
+          addressBase58 &&
+        existing.addressHex ===
+          addressHex
+      ) {
+        return existing;
+      }
+
+      throw new AppError(
+        "El usuario ya posee una wallet TRON registrada.",
+        "TRON_ACCOUNT_ALREADY_EXISTS",
+        409,
+      );
+    }
+
+    const registeredAddress =
+      await this.accounts
+        .findByAddress(
+          addressBase58,
+          network,
+        );
+
+    if (
+      registeredAddress
+    ) {
+      throw new AppError(
+        "La dirección TRON ya se encuentra asociada a otro usuario.",
+        "TRON_ADDRESS_ALREADY_REGISTERED",
+        409,
+      );
+    }
+
+    const createInput:
+      CreateTronAccountInput =
+        {
+          userId:
+            input.userId,
+
+          network,
+
+          addressBase58,
+
+          addressHex,
+        };
+
+    try {
+      return await this.accounts
+        .create(
+          createInput,
+        );
+    } catch (
+      error
+    ) {
+      /*
+       * Repository puede lanzar errores por:
+       *
+       * - índices UNIQUE;
+       * - usuario ya registrado;
+       * - address duplicada;
+       *
+       * Convertimos esos errores en una respuesta
+       * de aplicación más controlada.
+       */
+
+      if (
+        error instanceof
+        AppError
+      ) {
+        throw error;
+      }
+
+      const message =
+        error instanceof
+          Error
+          ? error.message
+          : "";
+
+      if (
+        message.includes(
+          "ya posee una wallet",
+        )
+      ) {
+        throw new AppError(
+          message,
+          "TRON_ACCOUNT_ALREADY_EXISTS",
+          409,
+        );
+      }
+
+      if (
+        message.includes(
+          "ya se encuentra registrada",
+        )
+      ) {
+        throw new AppError(
+          message,
+          "TRON_ADDRESS_ALREADY_REGISTERED",
+          409,
+        );
+      }
+
+      throw new AppError(
+        "No se pudo registrar la dirección TRON.",
+        "TRON_ACCOUNT_CREATE_ERROR",
+        500,
+      );
+    }
+  }
+
+  /*
+   * ========================================================
+   * DIRECCIÓN PÚBLICA
+   * ========================================================
+   */
+
+  async getPublicAddress(
+    userId:
+      string,
+  ) {
+    const account =
+      await this
+        .getAccountForUser(
+          userId,
+        );
+
+    if (
+      !account ||
+      !account._id
+    ) {
+      return null;
+    }
+
+    return this.accounts
+      .toPublic(
+        account,
+      );
+  }
+
+  /*
+   * ========================================================
+   * BALANCE USDT
+   * ========================================================
+   *
+   * Fuente de verdad:
+   *
+   * contrato USDT en TRON.
+   *
+   * MongoDB NO determina este balance.
+   */
+
+  async getUsdtBalance(
+    address:
+      string,
+  ): Promise<
+    TronUsdtBalance
+  > {
+    const tronWeb =
+      TronClient
+        .createForAddress(
+          address,
+        );
+
+    const contractAddress =
+      getUsdtTrc20Contract();
 
     try {
       const contract =
         await tronWeb
           .contract()
           .at(
-            usdtContract,
+            contractAddress,
           );
 
       const result =
@@ -243,22 +466,25 @@ export class TronService {
               address,
           });
 
-      if (
-        result === null ||
-        result === undefined
-      ) {
-        throw new Error(
-          "El contrato USDT no devolvió saldo.",
-        );
-      }
-
-      usdtBalanceUnits =
+      const balance =
         BigInt(
           result.toString(),
         );
-    } catch (error) {
+
+      return {
+        balanceUnits:
+          balance.toString(),
+
+        formattedBalance:
+          formatUsdtDisplay(
+            balance,
+          ),
+      };
+    } catch (
+      error
+    ) {
       console.error(
-        "[TRON USDT BALANCE]",
+        `[TRON USDT BALANCE] ${address}`,
         error,
       );
 
@@ -268,176 +494,310 @@ export class TronService {
         502,
       );
     }
+  }
 
-    return {
-      network,
+  /*
+   * ========================================================
+   * BALANCE TRX
+   * ========================================================
+   */
 
-      address,
+  async getTrxBalance(
+    address:
+      string,
+  ): Promise<
+    TronTrxBalance
+  > {
+    const tronWeb =
+      TronClient
+        .createForAddress(
+          address,
+        );
 
-      activated,
+    try {
+      const balanceNumber =
+        await tronWeb.trx
+          .getBalance(
+            address,
+          );
 
-      trx: {
+      if (
+        !Number.isSafeInteger(
+          balanceNumber,
+        )
+      ) {
+        throw new Error(
+          "Saldo TRX fuera del rango entero seguro.",
+        );
+      }
+
+      const balanceSun =
+        BigInt(
+          balanceNumber,
+        );
+
+      return {
         balanceSun:
-          trxBalanceSun.toString(),
+          balanceSun
+            .toString(),
 
         formattedBalance:
           this.formatTrx(
-            trxBalanceSun,
+            balanceSun,
           ),
-      },
+      };
+    } catch (
+      error
+    ) {
+      console.error(
+        `[TRON TRX BALANCE] ${address}`,
+        error,
+      );
 
-      usdt: {
-        contract:
-          usdtContract,
-
-        balanceUnits:
-          usdtBalanceUnits.toString(),
-
-        formattedBalance:
-          formatUsdtDisplay(
-            usdtBalanceUnits,
-          ),
-      },
-    };
+      throw new AppError(
+        "No se pudo consultar el saldo TRX.",
+        "TRON_TRX_BALANCE_ERROR",
+        502,
+      );
+    }
   }
 
-  private async createAccountForUser(
-    userId: string,
-    network:
-      TronNetwork,
+  /*
+   * ========================================================
+   * RECURSOS
+   * ========================================================
+   */
+
+  async getResources(
+    address:
+      string,
   ): Promise<
-    TronAccountDocument
+    TronResourceStatus
   > {
-    const wallet =
-      await this.wallets
-        .getOrCreateUserWallet(
-          userId,
-          "USDT",
+    const tronWeb =
+      TronClient
+        .createForAddress(
+          address,
         );
 
-    if (!wallet._id) {
-      throw new AppError(
-        "La wallet no posee un identificador válido.",
-        "INVALID_WALLET_ACCOUNT",
-        500,
-      );
-    }
+    try {
+      const resources =
+        (
+          await tronWeb.trx
+            .getAccountResources(
+              address,
+            )
+        ) as
+          TronAccountResources;
 
-    const generated =
-      await TronWeb.createAccount();
+      const energyAvailable =
+        Math.max(
+          0,
 
-    const privateKey =
-      generated.privateKey;
+          (
+            resources.EnergyLimit ??
+            0
+          ) -
+            (
+              resources.EnergyUsed ??
+              0
+            ),
+        );
 
-    const addressBase58 =
-      generated.address
-        .base58;
+      const bandwidthAvailable =
+        Math.max(
+          0,
 
-    const addressHex =
-      generated.address
-        .hex;
+          (
+            resources.freeNetLimit ??
+            0
+          ) -
+            (
+              resources.freeNetUsed ??
+              0
+            ) +
+            (
+              resources.NetLimit ??
+              0
+            ) -
+            (
+              resources.NetUsed ??
+              0
+            ),
+        );
 
-    if (
-      !privateKey ||
-      !addressBase58 ||
-      !addressHex
+      return {
+        energyAvailable:
+          energyAvailable
+            .toString(),
+
+        bandwidthAvailable:
+          bandwidthAvailable
+            .toString(),
+      };
+    } catch (
+      error
     ) {
+      console.error(
+        `[TRON RESOURCES] ${address}`,
+        error,
+      );
+
       throw new AppError(
-        "No se pudo generar la cuenta TRON.",
-        "TRON_ACCOUNT_GENERATION_FAILED",
-        500,
+        "No se pudieron consultar los recursos de la wallet.",
+        "TRON_RESOURCES_ERROR",
+        502,
       );
     }
-
-    const encryptedPrivateKey =
-      encryptValue(
-        privateKey,
-      );
-
-    return this.accounts.create({
-      userId,
-
-      walletAccountId:
-        wallet._id.toString(),
-
-      network,
-
-      addressBase58,
-
-      addressHex,
-
-      encryptedPrivateKey,
-    });
   }
 
-  private async toPublicAccount(
-    account:
-      TronAccountDocument,
+  /*
+   * ========================================================
+   * ESTADO COMPLETO DE WALLET
+   * ========================================================
+   */
+
+  async getWalletStatus(
+    userId:
+      string,
   ): Promise<
-    PublicTronAccount
+    TronWalletStatus |
+    null
   > {
-    if (!account._id) {
-      throw new AppError(
-        "La cuenta TRON no posee identificador.",
-        "INVALID_TRON_ACCOUNT",
-        500,
-      );
+    const account =
+      await this
+        .getAccountForUser(
+          userId,
+        );
+
+    if (
+      !account ||
+      !account._id
+    ) {
+      return null;
     }
 
-    const qrDataUrl =
-      await QRCode.toDataURL(
-        account.addressBase58,
-        {
-          errorCorrectionLevel:
-            "M",
+    const publicAccount =
+      this.accounts
+        .toPublic(
+          account,
+        );
 
-          margin:
-            1,
+    const [
+      usdt,
+      trx,
+      resources,
+    ] =
+      await Promise.all([
+        this.getUsdtBalance(
+          account.addressBase58,
+        ),
 
-          width:
-            320,
-        },
-      );
+        this.getTrxBalance(
+          account.addressBase58,
+        ),
+
+        this.getResources(
+          account.addressBase58,
+        ),
+      ]);
 
     return {
-      id:
-        account._id.toString(),
+      account:
+        publicAccount,
 
-      network:
-        account.network,
+      usdt,
 
-      address:
-        account.addressBase58,
+      trx,
 
-      addressHex:
-        account.addressHex,
-
-      qrDataUrl,
-
-      createdAt:
-        account.createdAt
-          .toISOString(),
+      resources,
     };
   }
 
+  /*
+   * ========================================================
+   * ACTIVACIÓN DE CUENTA
+   * ========================================================
+   *
+   * Esto solamente indica si la address existe como
+   * Account en el estado nativo de TRON.
+   *
+   * Una address puede tener actividad TRC20 y este dato
+   * debe tratarse independientemente.
+   */
+
+  async isAccountActivated(
+    address:
+      string,
+  ): Promise<boolean> {
+    const tronWeb =
+      TronClient
+        .createForAddress(
+          address,
+        );
+
+    try {
+      const account =
+        await tronWeb.trx
+          .getAccount(
+            address,
+          );
+
+      if (
+        !account
+      ) {
+        return false;
+      }
+
+      return (
+        typeof account ===
+          "object" &&
+        Object.keys(
+          account,
+        ).length >
+          0
+      );
+    } catch (
+      error
+    ) {
+      console.error(
+        `[TRON ACCOUNT STATUS] ${address}`,
+        error,
+      );
+
+      return false;
+    }
+  }
+
+  /*
+   * ========================================================
+   * FORMATO TRX
+   * ========================================================
+   */
+
   private formatTrx(
-    sun: bigint,
+    amountSun:
+      bigint,
   ): string {
+    const scale =
+      1_000_000n;
+
     const negative =
-      sun < 0n;
+      amountSun <
+      0n;
 
     const absolute =
       negative
-        ? -sun
-        : sun;
+        ? -amountSun
+        : amountSun;
 
-    const integerPart =
+    const integer =
       absolute /
-      TRX_SCALE;
+      scale;
 
-    const decimalPart =
+    const decimals =
       absolute %
-      TRX_SCALE;
+      scale;
 
     const formattedInteger =
       new Intl.NumberFormat(
@@ -447,11 +807,11 @@ export class TronService {
             0,
         },
       ).format(
-        integerPart,
+        integer,
       );
 
-    const decimals =
-      decimalPart
+    const decimalText =
+      decimals
         .toString()
         .padStart(
           6,
@@ -462,13 +822,13 @@ export class TronService {
           "",
         );
 
-    const formatted =
-      decimals
-        ? `${formattedInteger},${decimals}`
+    const result =
+      decimalText
+        ? `${formattedInteger},${decimalText}`
         : formattedInteger;
 
     return negative
-      ? `-${formatted}`
-      : formatted;
+      ? `-${result}`
+      : result;
   }
 }

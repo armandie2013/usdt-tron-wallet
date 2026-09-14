@@ -7,18 +7,35 @@ import type {
   TronNetwork,
 } from "@/modules/blockchain/tron/tron.types";
 
+/*
+ * ============================================================
+ * ESTADO DEL EVENTO ON-CHAIN
+ * ============================================================
+ *
+ * El depósito representa un evento USDT real observado
+ * directamente en TRON.
+ *
+ * MongoDB solamente registra/indexa metadata de ese evento.
+ */
+
 export type BlockchainDepositStatus =
-  | "DETECTED"
-  | "CREDITED"
+  | "CONFIRMED"
   | "FAILED";
 
-export interface BlockchainDepositDocument {
-  _id?: ObjectId;
+/*
+ * ============================================================
+ * DOCUMENTO INDEXADO
+ * ============================================================
+ */
 
-  userId:
+export interface BlockchainDepositDocument {
+  _id?:
     ObjectId;
 
-  walletAccountId:
+  /*
+   * Usuario asociado a la dirección pública receptora.
+   */
+  userId:
     ObjectId;
 
   network:
@@ -33,9 +50,16 @@ export interface BlockchainDepositDocument {
   txid:
     string;
 
+  /*
+   * Permite diferenciar varios eventos dentro
+   * de una misma transacción.
+   */
   eventIndex:
     number;
 
+  /*
+   * Clave determinista y única del evento on-chain.
+   */
   eventKey:
     string;
 
@@ -48,6 +72,12 @@ export interface BlockchainDepositDocument {
   toAddress:
     string;
 
+  /*
+   * Base units USDT.
+   *
+   * Se mantiene Long porque el esquema existente
+   * ya trabaja con BSON Long.
+   */
   amountUnits:
     Long;
 
@@ -57,9 +87,9 @@ export interface BlockchainDepositDocument {
   status:
     BlockchainDepositStatus;
 
-  ledgerTransactionId?:
-    ObjectId;
-
+  /*
+   * Campo únicamente informativo si alguna indexación falla.
+   */
   errorMessage?:
     string;
 
@@ -69,6 +99,12 @@ export interface BlockchainDepositDocument {
   updatedAt:
     Date;
 }
+
+/*
+ * ============================================================
+ * EVENTOS DEL SCANNER DE CONTRATO
+ * ============================================================
+ */
 
 export interface TronContractTransferEvent {
   block_number:
@@ -90,15 +126,35 @@ export interface TronContractTransferEvent {
     string;
 
   result: {
-    from?: string;
-    to?: string;
-    value?: string;
+    from?:
+      string;
 
-    "0"?: string;
-    "1"?: string;
-    "2"?: string;
+    to?:
+      string;
+
+    value?:
+      string;
+
+    /*
+     * TronGrid también puede devolver parámetros
+     * indexados por posición.
+     */
+    "0"?:
+      string;
+
+    "1"?:
+      string;
+
+    "2"?:
+      string;
   };
 }
+
+/*
+ * ============================================================
+ * RESPUESTA DE EVENTOS DEL CONTRATO
+ * ============================================================
+ */
 
 export interface TronContractEventsResponse {
   success:
@@ -108,25 +164,42 @@ export interface TronContractEventsResponse {
     TronContractTransferEvent[];
 
   meta?: {
-    at?: number;
-    page_size?: number;
-    fingerprint?: string;
+    at?:
+      number;
+
+    page_size?:
+      number;
+
+    fingerprint?:
+      string;
   };
 }
 
 /*
- * Lo conservamos temporalmente porque todavía
- * existe el sincronizador manual por usuario.
+ * ============================================================
+ * HISTORIAL TRC20 POR CUENTA
+ * ============================================================
+ *
+ * Se conserva porque todavía existe el sincronizador
+ * manual por usuario.
  */
+
 export interface TronGridTrc20Transaction {
   transaction_id:
     string;
 
   token_info?: {
-    symbol?: string;
-    address?: string;
-    decimals?: number;
-    name?: string;
+    symbol?:
+      string;
+
+    address?:
+      string;
+
+    decimals?:
+      number;
+
+    name?:
+      string;
   };
 
   block_timestamp:
@@ -145,6 +218,12 @@ export interface TronGridTrc20Transaction {
     string;
 }
 
+/*
+ * ============================================================
+ * RESPUESTA HISTORIAL TRC20
+ * ============================================================
+ */
+
 export interface TronGridTrc20Response {
   success:
     boolean;
@@ -153,8 +232,13 @@ export interface TronGridTrc20Response {
     TronGridTrc20Transaction[];
 
   meta?: {
-    at?: number;
-    page_size?: number;
-    fingerprint?: string;
+    at?:
+      number;
+
+    page_size?:
+      number;
+
+    fingerprint?:
+      string;
   };
 }

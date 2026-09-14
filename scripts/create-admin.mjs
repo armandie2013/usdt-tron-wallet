@@ -1,144 +1,225 @@
 import bcrypt from "bcryptjs";
+
 import {
   MongoClient,
 } from "mongodb";
 
-import {
-  createInterface,
-} from "node:readline/promises";
-
-import {
-  stdin as input,
-  stdout as output,
-} from "node:process";
-
 const {
   MONGODB_URI,
   MONGODB_DB,
+
+  BOOTSTRAP_ADMIN_NAME,
+  BOOTSTRAP_ADMIN_EMAIL,
+  BOOTSTRAP_ADMIN_PASSWORD,
 } = process.env;
 
-if (
-  !MONGODB_URI ||
-  !MONGODB_DB
-) {
-  console.error(
-    "Faltan MONGODB_URI o MONGODB_DB.",
-  );
+async function main() {
+  /*
+   * ============================================================
+   * VALIDACIÓN DE ENTORNO
+   * ============================================================
+   */
 
-  process.exit(1);
-}
+  if (
+    !MONGODB_URI ||
+    !MONGODB_DB
+  ) {
+    throw new Error(
+      "Faltan MONGODB_URI o MONGODB_DB.",
+    );
+  }
 
-const rl =
-  createInterface({
-    input,
-    output,
-  });
-
-const client =
-  new MongoClient(
-    MONGODB_URI,
-  );
-
-try {
   const name =
-    (
-      await rl.question(
-        "Nombre del administrador: ",
-      )
-    ).trim();
+    BOOTSTRAP_ADMIN_NAME
+      ?.trim();
 
   const email =
-    (
-      await rl.question(
-        "Email: ",
-      )
-    )
-      .trim()
+    BOOTSTRAP_ADMIN_EMAIL
+      ?.trim()
       .toLowerCase();
 
   const password =
-    await rl.question(
-      "Contraseña: ",
-    );
+    BOOTSTRAP_ADMIN_PASSWORD ??
+    "";
 
   if (
-    !name ||
-    !email ||
-    password.length < 8
+    !name
   ) {
     throw new Error(
-      "Datos inválidos. La contraseña debe tener al menos 8 caracteres.",
+      "Falta BOOTSTRAP_ADMIN_NAME.",
     );
   }
 
-  await client.connect();
-
-  const db =
-    client.db(
-      MONGODB_DB,
-    );
-
-  const users =
-    db.collection(
-      "users",
-    );
-
-  const existing =
-    await users.findOne({
-      email,
-    });
-
-  if (existing) {
+  if (
+    !email
+  ) {
     throw new Error(
-      "Ya existe un usuario con ese email.",
+      "Falta BOOTSTRAP_ADMIN_EMAIL.",
     );
   }
 
-  const passwordHash =
-    await bcrypt.hash(
-      password,
-      12,
+  if (
+    password.length <
+      8
+  ) {
+    throw new Error(
+      "BOOTSTRAP_ADMIN_PASSWORD debe tener al menos 8 caracteres.",
+    );
+  }
+
+  /*
+   * ============================================================
+   * CONEXIÓN
+   * ============================================================
+   */
+
+  const client =
+    new MongoClient(
+      MONGODB_URI,
     );
 
-  const now =
-    new Date();
+  try {
+    await client.connect();
 
-  const result =
-    await users.insertOne({
-      name,
-      email,
-      passwordHash,
+    const db =
+      client.db(
+        MONGODB_DB,
+      );
 
-      role: "ADMIN",
-      status: "ACTIVE",
+    const users =
+      db.collection(
+        "users",
+      );
 
-      emailVerified:
-        true,
+    /*
+     * ==========================================================
+     * BLOQUEO DE SEGUNDO ADMIN
+     * ==========================================================
+     */
 
-      createdAt: now,
-      updatedAt: now,
-    });
+    const existingAdmin =
+      await users.findOne({
+        role:
+          "ADMIN",
+      });
 
-  console.log("");
-  console.log(
-    "Administrador creado correctamente.",
-  );
+    if (
+      existingAdmin
+    ) {
+      console.log("");
 
-  console.log(
-    `ID: ${result.insertedId.toString()}`,
-  );
-} catch (error) {
-  console.error("");
+      console.log(
+        "Ya existe un usuario ADMIN. No se creó ningún usuario nuevo.",
+      );
 
-  console.error(
-    error instanceof Error
-      ? error.message
-      : error,
-  );
+      console.log(
+        `Email actual: ${existingAdmin.email ?? "no disponible"}`,
+      );
 
-  process.exitCode = 1;
-} finally {
-  rl.close();
+      return;
+    }
 
-  await client.close();
+    /*
+     * ==========================================================
+     * EMAIL DUPLICADO
+     * ==========================================================
+     */
+
+    const existingEmail =
+      await users.findOne({
+        email,
+      });
+
+    if (
+      existingEmail
+    ) {
+      throw new Error(
+        "Ya existe un usuario con el email configurado para el administrador.",
+      );
+    }
+
+    /*
+     * ==========================================================
+     * PASSWORD
+     * ==========================================================
+     */
+
+    const passwordHash =
+      await bcrypt.hash(
+        password,
+        12,
+      );
+
+    const now =
+      new Date();
+
+    /*
+     * ==========================================================
+     * CREACIÓN
+     * ==========================================================
+     */
+
+    const result =
+      await users.insertOne({
+        name,
+
+        email,
+
+        passwordHash,
+
+        role:
+          "ADMIN",
+
+        status:
+          "ACTIVE",
+
+        emailVerified:
+          true,
+
+        createdAt:
+          now,
+
+        updatedAt:
+          now,
+      });
+
+    console.log("");
+
+    console.log(
+      "Administrador inicial creado correctamente.",
+    );
+
+    console.log(
+      `ID: ${result.insertedId.toString()}`,
+    );
+
+    console.log(
+      `Email: ${email}`,
+    );
+
+    console.log("");
+
+    console.log(
+      "Por seguridad, eliminá ahora BOOTSTRAP_ADMIN_NAME, BOOTSTRAP_ADMIN_EMAIL y BOOTSTRAP_ADMIN_PASSWORD de .env.local.",
+    );
+  } finally {
+    await client.close();
+  }
 }
+
+main().catch(
+  (
+    error,
+  ) => {
+    console.error("");
+
+    console.error(
+      error instanceof Error
+        ? error.message
+        : error,
+    );
+
+    process.exitCode =
+      1;
+  },
+);

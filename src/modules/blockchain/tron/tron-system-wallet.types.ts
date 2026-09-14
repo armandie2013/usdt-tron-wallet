@@ -6,15 +6,58 @@ import type {
   TronNetwork,
 } from "./tron.types";
 
+/*
+ * ============================================================
+ * WALLET DE PLATAFORMA
+ * ============================================================
+ *
+ * Esta wallet pertenece exclusivamente a la plataforma.
+ *
+ * Puede utilizarse para:
+ *
+ * - mantener TRX propios;
+ * - pagar operaciones propias de la plataforma;
+ * - hacer staking de TRX;
+ * - obtener Energy;
+ * - delegar Energy/Bandwidth;
+ * - recibir comisiones de la plataforma.
+ *
+ * IMPORTANTE:
+ *
+ * Esta wallet NO contiene fondos pertenecientes a usuarios.
+ * Las wallets de usuarios continúan siendo no-custodial.
+ */
+
 export type TronSystemWalletCode =
-  "HOT_WALLET";
+  | "HOT_WALLET"
+  | "PLATFORM_TREASURY";
+
+/*
+ * HOT_WALLET se mantiene temporalmente por compatibilidad
+ * con registros y código legacy.
+ *
+ * PLATFORM_TREASURY será el código utilizado por el nuevo
+ * modelo de wallet propia de la plataforma.
+ */
 
 export type TronSystemWalletStatus =
   | "ACTIVE"
   | "DISABLED";
 
+/*
+ * ============================================================
+ * DOCUMENTO INTERNO
+ * ============================================================
+ *
+ * encryptedPrivateKey puede existir porque esta wallet es
+ * propiedad de la plataforma.
+ *
+ * Nunca debe utilizarse este modelo para wallets de usuarios.
+ */
+
 export interface TronSystemWalletDocument {
-  _id?: ObjectId;
+  _id?:
+    ObjectId;
 
   code:
     TronSystemWalletCode;
@@ -41,6 +84,14 @@ export interface TronSystemWalletDocument {
     Date;
 }
 
+/*
+ * ============================================================
+ * REPRESENTACIÓN PÚBLICA / ADMIN
+ * ============================================================
+ *
+ * Nunca exponemos encryptedPrivateKey.
+ */
+
 export interface PublicTronSystemWallet {
   id:
     string;
@@ -61,5 +112,8 @@ export interface PublicTronSystemWallet {
     TronSystemWalletStatus;
 
   createdAt:
+    string;
+
+  updatedAt:
     string;
 }

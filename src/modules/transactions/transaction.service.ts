@@ -1,378 +1,857 @@
 import {
-  randomUUID,
-} from "crypto";
+  TronWeb,
+} from "tronweb";
 
 import {
   AppError,
 } from "@/lib/errors/app-error";
 
 import {
-  longToBigint,
-} from "@/lib/money/amount";
-
-import {
   formatUsdt,
-  parseUsdt,
 } from "@/lib/money/usdt";
 
 import {
-  LedgerRepository,
-} from "@/modules/ledger/ledger.repository";
+  TronAccountRepository,
+} from "@/modules/blockchain/tron/tron-account.repository";
 
 import {
-  LedgerService,
-} from "@/modules/ledger/ledger.service";
+  getUsdtTrc20Contract,
+} from "@/modules/blockchain/tron/usdt.contract";
 
-import {
-  UserRepository,
-} from "@/modules/users/user.repository";
+import type {
+  TronNetwork,
+} from "@/modules/blockchain/tron/tron.types";
 
-import {
-  WalletRepository,
-} from "@/modules/wallets/wallet.repository";
+import type {
+  TronGridTrc20Response,
+  TronGridTrc20Transaction,
+} from "@/modules/deposits/deposit.types";
 
 import type {
   PublicTransaction,
 } from "./transaction.types";
 
-import type {
-  InternalTransferInput,
-} from "./transaction.validation";
+const MAX_HISTORY_LIMIT =
+  200;
+
+const DEFAULT_HISTORY_LIMIT =
+  50;
+
+const MAX_PAGES_PER_DIRECTION =
+  20;
+
+type TransactionDirection =
+  | "CREDIT"
+  | "DEBIT";
+
+interface NormalizedTronTransaction {
+  txid:
+    string;
+
+  fromAddress:
+    string;
+
+  toAddress:
+    string;
+
+  amountUnits:
+    bigint;
+
+  blockTimestamp:
+    number;
+
+  direction:
+    TransactionDirection;
+}
 
 export class TransactionService {
-  private readonly users =
-    new UserRepository();
+  private readonly accounts =
+    new TronAccountRepository();
 
-  private readonly wallets =
-    new WalletRepository();
+  /*
+   * ==========================================================
+   * RED
+   * ==========================================================
+   */
 
-  private readonly ledger =
-    new LedgerService();
+  private getNetwork():
+    TronNetwork {
+    const value =
+      process.env
+        .TRON_NETWORK
+        ?.trim()
+        .toLowerCase();
 
-  private readonly ledgerRepository =
-    new LedgerRepository();
-
-  async internalTransfer(
-    senderUserId: string,
-    input:
-      InternalTransferInput,
-  ) {
-    const sender =
-      await this.users.findById(
-        senderUserId,
-      );
-
-    if (
-      !sender ||
-      !sender._id
-    ) {
-      throw new AppError(
-        "Usuario remitente no encontrado.",
-        "SENDER_NOT_FOUND",
-        404,
-      );
-    }
-
-    const recipient =
-      await this.users.findByEmail(
-        input.recipientEmail,
-      );
-
-    if (
-      !recipient ||
-      !recipient._id
-    ) {
-      throw new AppError(
-        "No se encontró el usuario destinatario.",
-        "RECIPIENT_NOT_FOUND",
-        404,
-      );
-    }
-
-    if (
-      recipient.status !==
-      "ACTIVE"
-    ) {
-      throw new AppError(
-        "El usuario destinatario no se encuentra activo.",
-        "RECIPIENT_NOT_ACTIVE",
-        409,
-      );
-    }
-
-    if (
-      sender._id.equals(
-        recipient._id,
-      )
-    ) {
-      throw new AppError(
-        "No puede transferirse USDT a su propia cuenta.",
-        "SELF_TRANSFER_NOT_ALLOWED",
-        400,
-      );
-    }
-
-    let amount: bigint;
-
-    try {
-      amount =
-        parseUsdt(
-          input.amount,
-        );
-    } catch {
-      throw new AppError(
-        "El monto USDT no es válido.",
-        "INVALID_AMOUNT",
-        400,
-      );
-    }
-
-    if (
-      amount <= 0n
-    ) {
-      throw new AppError(
-        "El monto debe ser mayor a cero.",
-        "INVALID_AMOUNT",
-        400,
-      );
-    }
-
-    const senderWallet =
-      await this.wallets
-        .getOrCreateUserWallet(
-          sender._id.toString(),
-          "USDT",
-        );
-
-    const recipientWallet =
-      await this.wallets
-        .getOrCreateUserWallet(
-          recipient._id.toString(),
-          "USDT",
-        );
-
-    if (
-      !senderWallet._id ||
-      !recipientWallet._id
-    ) {
-      throw new AppError(
-        "No se pudieron obtener las billeteras.",
-        "INVALID_WALLET_ACCOUNT",
-        500,
-      );
-    }
-
-    if (
-      senderWallet.status !==
-        "ACTIVE" ||
-      recipientWallet.status !==
-        "ACTIVE"
-    ) {
-      throw new AppError(
-        "Una de las billeteras no se encuentra activa.",
-        "WALLET_NOT_ACTIVE",
-        409,
-      );
-    }
-
-    const senderBalance =
-      await this.ledger
-        .getBalance(
-          senderWallet._id.toString(),
-        );
-
-    if (
-      senderBalance <
-      amount
-    ) {
-      throw new AppError(
-        "Saldo insuficiente.",
-        "INSUFFICIENT_BALANCE",
-        409,
-      );
-    }
-
-    const transferId =
-      randomUUID();
-
-    const transaction =
-      await this.ledger.post({
-        asset:
-          "USDT",
-
-        type:
-          "INTERNAL_TRANSFER",
-
-        idempotencyKey:
-          `internal-transfer:${transferId}`,
-
-        referenceType:
-          "INTERNAL_TRANSFER",
-
-        referenceId:
-          transferId,
-
-        metadata: {
-          senderUserId:
-            sender._id.toString(),
-
-          recipientUserId:
-            recipient._id.toString(),
-
-          recipientEmail:
-            recipient.email,
-        },
-
-        entries: [
-          {
-            accountId:
-              senderWallet._id.toString(),
-
-            amount:
-              -amount,
-
-            description:
-              `Transferencia a ${recipient.email}`,
-          },
-
-          {
-            accountId:
-              recipientWallet._id.toString(),
-
-            amount,
-
-            description:
-              `Transferencia de ${sender.email}`,
-          },
-        ],
-      });
-
-    const newBalance =
-      await this.ledger
-        .getBalance(
-          senderWallet._id.toString(),
-        );
-
-    return {
-      transactionId:
-        transaction._id?.toString(),
-
-      transferId,
-
-      recipient: {
-        id:
-          recipient._id.toString(),
-
-        name:
-          recipient.name,
-
-        email:
-          recipient.email,
-      },
-
-      amount:
-        amount.toString(),
-
-      formattedAmount:
-        formatUsdt(
-          amount,
-        ),
-
-      balance:
-        newBalance.toString(),
-
-      formattedBalance:
-        formatUsdt(
-          newBalance,
-        ),
-    };
+    return value ===
+      "mainnet"
+      ? "MAINNET"
+      : "NILE";
   }
 
+  /*
+   * ==========================================================
+   * HISTORIAL DEL USUARIO
+   * ==========================================================
+   *
+   * Fuente de verdad:
+   *
+   * TRON / TronGrid
+   *
+   * MongoDB y el ledger interno NO participan.
+   */
+
   async listUserTransactions(
-    userId: string,
-    limit = 50,
+    userId:
+      string,
+
+    requestedLimit =
+      DEFAULT_HISTORY_LIMIT,
   ): Promise<
     PublicTransaction[]
   > {
-    const wallet =
-      await this.wallets
-        .getOrCreateUserWallet(
+    const network =
+      this.getNetwork();
+
+    const account =
+      await this.accounts
+        .findByUserId(
           userId,
-          "USDT",
+          network,
         );
 
-    if (!wallet._id) {
+    /*
+     * Un usuario que todavía no registró wallet
+     * simplemente no tiene historial blockchain.
+     */
+    if (
+      !account
+    ) {
+      return [];
+    }
+
+    if (
+      account.status !==
+      "ACTIVE"
+    ) {
       throw new AppError(
-        "La billetera no posee un identificador válido.",
-        "INVALID_WALLET_ACCOUNT",
+        "La wallet TRON del usuario no está activa.",
+        "TRON_ACCOUNT_DISABLED",
+        409,
+      );
+    }
+
+    const address =
+      account
+        .addressBase58;
+
+    const limit =
+      this.normalizeLimit(
+        requestedLimit,
+      );
+
+    /*
+     * Consultamos entradas y salidas en paralelo.
+     */
+    const [
+      incoming,
+      outgoing,
+    ] =
+      await Promise.all([
+        this.fetchTransfers({
+          address,
+
+          direction:
+            "CREDIT",
+
+          limit,
+        }),
+
+        this.fetchTransfers({
+          address,
+
+          direction:
+            "DEBIT",
+
+          limit,
+        }),
+      ]);
+
+    /*
+     * ========================================================
+     * COMBINAR / DEDUPLICAR
+     * ========================================================
+     */
+
+    const unique =
+      new Map<
+        string,
+        NormalizedTronTransaction
+      >();
+
+    for (
+      const transaction of
+      [
+        ...incoming,
+        ...outgoing,
+      ]
+    ) {
+      const key =
+        [
+          transaction.txid,
+          transaction.fromAddress,
+          transaction.toAddress,
+          transaction.amountUnits
+            .toString(),
+          transaction.blockTimestamp,
+          transaction.direction,
+        ].join(
+          ":",
+        );
+
+      if (
+        !unique.has(
+          key,
+        )
+      ) {
+        unique.set(
+          key,
+          transaction,
+        );
+      }
+    }
+
+    /*
+     * Más recientes primero.
+     */
+    const transactions =
+      Array.from(
+        unique.values(),
+      )
+        .sort(
+          (
+            a,
+            b,
+          ) =>
+            b.blockTimestamp -
+            a.blockTimestamp,
+        )
+        .slice(
+          0,
+          limit,
+        );
+
+    /*
+     * ========================================================
+     * PUBLIC TRANSACTION
+     * ========================================================
+     *
+     * Conservamos por ahora la interfaz actual
+     * que consume el frontend.
+     *
+     * CREDIT => amount positivo
+     * DEBIT  => amount negativo
+     */
+
+    return transactions.map(
+      (
+        transaction,
+      ) => {
+        const signedAmount =
+          transaction.direction ===
+          "CREDIT"
+            ? transaction
+                .amountUnits
+            : -transaction
+                .amountUnits;
+
+        return {
+          id:
+            transaction.txid,
+
+          type:
+            "TRC20_TRANSFER",
+
+          asset:
+            "USDT" as const,
+
+          amount:
+            signedAmount
+              .toString(),
+
+          formattedAmount:
+            formatUsdt(
+              signedAmount,
+            ),
+
+          direction:
+            transaction.direction,
+
+          referenceType:
+            "TRON_TRC20_TRANSACTION",
+
+          referenceId:
+            transaction.txid,
+
+          createdAt:
+            new Date(
+              transaction
+                .blockTimestamp,
+            ).toISOString(),
+        };
+      },
+    );
+  }
+
+  /*
+   * ==========================================================
+   * CONSULTAR TRANSFERENCIAS TRC20
+   * ==========================================================
+   */
+
+  private async fetchTransfers(
+    input: {
+      address:
+        string;
+
+      direction:
+        TransactionDirection;
+
+      limit:
+        number;
+    },
+  ): Promise<
+    NormalizedTronTransaction[]
+  > {
+    const fullHost =
+      process.env
+        .TRON_FULL_HOST
+        ?.trim();
+
+    if (
+      !fullHost
+    ) {
+      throw new AppError(
+        "TRON_FULL_HOST no está configurado.",
+        "TRON_CONFIGURATION_ERROR",
         500,
       );
     }
 
-    const accountId =
-      wallet._id.toString();
+    const contract =
+      getUsdtTrc20Contract();
 
-    const transactions =
-      await this.ledgerRepository
-        .listAccountTransactions(
-          accountId,
-          limit,
+    const results:
+      NormalizedTronTransaction[] =
+      [];
+
+    let fingerprint:
+      string |
+      null =
+      null;
+
+    let page =
+      0;
+
+    const seenFingerprints =
+      new Set<string>();
+
+    /*
+     * Seguimos paginando hasta reunir suficiente historial
+     * o hasta que TronGrid no entregue más páginas.
+     */
+    do {
+      page++;
+
+      if (
+        page >
+        MAX_PAGES_PER_DIRECTION
+      ) {
+        break;
+      }
+
+      const url =
+        new URL(
+          `/v1/accounts/${input.address}/transactions/trc20`,
+          fullHost,
         );
 
-    return transactions.map(
-      (transaction) => {
-        const entry =
-          transaction.entries.find(
-            (item) =>
-              item.accountId.toString() ===
-              accountId,
+      url.searchParams.set(
+        "only_confirmed",
+        "true",
+      );
+
+      url.searchParams.set(
+        "contract_address",
+        contract,
+      );
+
+      url.searchParams.set(
+        "limit",
+        "200",
+      );
+
+      url.searchParams.set(
+        "order_by",
+        "block_timestamp,desc",
+      );
+
+      if (
+        input.direction ===
+        "CREDIT"
+      ) {
+        url.searchParams.set(
+          "only_to",
+          "true",
+        );
+      } else {
+        url.searchParams.set(
+          "only_from",
+          "true",
+        );
+      }
+
+      if (
+        fingerprint
+      ) {
+        url.searchParams.set(
+          "fingerprint",
+          fingerprint,
+        );
+      }
+
+      const apiKey =
+        process.env
+          .TRON_API_KEY
+          ?.trim();
+
+      const response =
+        await fetch(
+          url,
+          {
+            method:
+              "GET",
+
+            headers:
+              apiKey
+                ? {
+                    "TRON-PRO-API-KEY":
+                      apiKey,
+                  }
+                : undefined,
+
+            cache:
+              "no-store",
+          },
+        );
+
+      if (
+        !response.ok
+      ) {
+        const body =
+          await response
+            .text();
+
+        console.error(
+          "[TRON TRANSACTION HISTORY]",
+          {
+            address:
+              input.address,
+
+            direction:
+              input.direction,
+
+            status:
+              response.status,
+
+            body,
+          },
+        );
+
+        throw new AppError(
+          "No se pudo consultar el historial TRC20.",
+          "TRON_TRANSACTION_HISTORY_ERROR",
+          502,
+        );
+      }
+
+      let data:
+        TronGridTrc20Response;
+
+      try {
+        data =
+          (
+            await response
+              .json()
+          ) as
+            TronGridTrc20Response;
+      } catch {
+        throw new AppError(
+          "TronGrid devolvió una respuesta que no pudo interpretarse.",
+          "TRON_TRANSACTION_HISTORY_ERROR",
+          502,
+        );
+      }
+
+      if (
+        data.success !==
+        true
+      ) {
+        throw new AppError(
+          "TronGrid devolvió una respuesta inválida.",
+          "TRON_TRANSACTION_HISTORY_ERROR",
+          502,
+        );
+      }
+
+      const pageTransactions =
+        Array.isArray(
+          data.data,
+        )
+          ? data.data
+          : [];
+
+      for (
+        const transaction of
+        pageTransactions
+      ) {
+        const normalized =
+          this.normalizeTransaction(
+            transaction,
+            input.address,
+            input.direction,
+            contract,
           );
 
-        if (!entry) {
-          throw new Error(
-            "La transacción no contiene la cuenta solicitada.",
-          );
+        if (
+          !normalized
+        ) {
+          continue;
         }
 
-        const amount =
-          longToBigint(
-            entry.amount,
-          );
+        results.push(
+          normalized,
+        );
 
-        return {
-          id:
-            transaction._id?.toString() ??
-            "",
+        if (
+          results.length >=
+          input.limit
+        ) {
+          break;
+        }
+      }
 
-          type:
-            transaction.type,
+      if (
+        results.length >=
+        input.limit
+      ) {
+        break;
+      }
 
-          asset:
-            transaction.asset,
+      const nextFingerprint =
+        data.meta
+          ?.fingerprint
+          ?.trim() ||
+        null;
 
-          amount:
-            amount.toString(),
+      if (
+        !nextFingerprint
+      ) {
+        fingerprint =
+          null;
 
-          formattedAmount:
-            formatUsdt(
-              amount,
-            ),
+        break;
+      }
 
-          direction:
-            amount >= 0n
-              ? "CREDIT"
-              : "DEBIT",
+      if (
+        seenFingerprints.has(
+          nextFingerprint,
+        )
+      ) {
+        throw new AppError(
+          "TronGrid devolvió una paginación inválida.",
+          "TRON_TRANSACTION_PAGINATION_ERROR",
+          502,
+        );
+      }
 
-          referenceType:
-            transaction.referenceType,
+      seenFingerprints.add(
+        nextFingerprint,
+      );
 
-          referenceId:
-            transaction.referenceId,
+      fingerprint =
+        nextFingerprint;
+    } while (
+      fingerprint
+    );
 
-          createdAt:
-            transaction.createdAt.toISOString(),
-        };
-      },
+    return results;
+  }
+
+  /*
+   * ==========================================================
+   * NORMALIZAR TRANSFERENCIA
+   * ==========================================================
+   */
+
+  private normalizeTransaction(
+    transaction:
+      TronGridTrc20Transaction,
+
+    userAddress:
+      string,
+
+    direction:
+      TransactionDirection,
+
+    contract:
+      string,
+  ): NormalizedTronTransaction |
+    null {
+    if (
+      transaction.type !==
+      "Transfer"
+    ) {
+      return null;
+    }
+
+    if (
+      transaction
+        .token_info
+        ?.address !==
+      contract
+    ) {
+      return null;
+    }
+
+    if (
+      transaction
+        .token_info
+        ?.decimals !==
+      6
+    ) {
+      return null;
+    }
+
+    if (
+      !transaction
+        .transaction_id
+    ) {
+      return null;
+    }
+
+    const fromAddress =
+      this.normalizeAddress(
+        transaction.from,
+      );
+
+    const toAddress =
+      this.normalizeAddress(
+        transaction.to,
+      );
+
+    const normalizedUserAddress =
+      this.normalizeAddress(
+        userAddress,
+      );
+
+    if (
+      !fromAddress ||
+      !toAddress ||
+      !normalizedUserAddress
+    ) {
+      return null;
+    }
+
+    if (
+      direction ===
+        "CREDIT" &&
+      toAddress !==
+        normalizedUserAddress
+    ) {
+      return null;
+    }
+
+    if (
+      direction ===
+        "DEBIT" &&
+      fromAddress !==
+        normalizedUserAddress
+    ) {
+      return null;
+    }
+
+    if (
+      !/^\d+$/.test(
+        transaction.value,
+      )
+    ) {
+      return null;
+    }
+
+    let amount:
+      bigint;
+
+    try {
+      amount =
+        BigInt(
+          transaction.value,
+        );
+    } catch {
+      return null;
+    }
+
+    if (
+      amount <=
+      0n
+    ) {
+      return null;
+    }
+
+    if (
+      !Number.isFinite(
+        transaction
+          .block_timestamp,
+      ) ||
+      transaction
+        .block_timestamp <=
+        0
+    ) {
+      return null;
+    }
+
+    return {
+      txid:
+        transaction
+          .transaction_id,
+
+      fromAddress,
+
+      toAddress,
+
+      amountUnits:
+        amount,
+
+      blockTimestamp:
+        transaction
+          .block_timestamp,
+
+      direction,
+    };
+  }
+
+  /*
+   * ==========================================================
+   * NORMALIZAR DIRECCIÓN TRON
+   * ==========================================================
+   */
+
+  private normalizeAddress(
+    value:
+      string,
+  ): string |
+    null {
+    const normalized =
+      value
+        ?.trim();
+
+    if (
+      !normalized
+    ) {
+      return null;
+    }
+
+    /*
+     * Base58.
+     */
+    if (
+      normalized.startsWith(
+        "T",
+      ) &&
+      TronWeb.isAddress(
+        normalized,
+      )
+    ) {
+      return normalized;
+    }
+
+    /*
+     * Hex TRON completo:
+     * 41 + 20 bytes.
+     */
+    if (
+      /^41[0-9a-fA-F]{40}$/.test(
+        normalized,
+      )
+    ) {
+      try {
+        const base58 =
+          TronWeb.address
+            .fromHex(
+              normalized,
+            );
+
+        return TronWeb.isAddress(
+          base58,
+        )
+          ? base58
+          : null;
+      } catch {
+        return null;
+      }
+    }
+
+    /*
+     * Dirección de evento EVM-style:
+     * 20 bytes sin prefijo 41.
+     */
+    if (
+      /^[0-9a-fA-F]{40}$/.test(
+        normalized,
+      )
+    ) {
+      try {
+        const base58 =
+          TronWeb.address
+            .fromHex(
+              `41${normalized}`,
+            );
+
+        return TronWeb.isAddress(
+          base58,
+        )
+          ? base58
+          : null;
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  /*
+   * ==========================================================
+   * LIMIT
+   * ==========================================================
+   */
+
+  private normalizeLimit(
+    value:
+      number,
+  ): number {
+    if (
+      !Number.isSafeInteger(
+        value,
+      ) ||
+      value <=
+        0
+    ) {
+      return DEFAULT_HISTORY_LIMIT;
+    }
+
+    return Math.min(
+      value,
+      MAX_HISTORY_LIMIT,
     );
   }
 }

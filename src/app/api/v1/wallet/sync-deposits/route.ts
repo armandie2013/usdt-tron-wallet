@@ -20,6 +20,24 @@ export const runtime =
 const depositService =
   new DepositService();
 
+/*
+ * ============================================================
+ * POST /api/v1/wallet/sync-deposits
+ * ============================================================
+ *
+ * Compatibilidad temporal.
+ *
+ * Este endpoint ya NO acredita depósitos ni modifica balances.
+ *
+ * Únicamente consulta:
+ *
+ * - transferencias TRC20 confirmadas;
+ * - saldo USDT real de la wallet;
+ * - información on-chain.
+ *
+ * La fuente de verdad es TRON.
+ */
+
 export async function POST() {
   try {
     const user =
@@ -35,10 +53,13 @@ export async function POST() {
       success:
         true,
 
+      source:
+        "TRON",
+
       message:
-        result.credited > 0
-          ? "Depósitos sincronizados correctamente."
-          : "No se encontraron depósitos nuevos.",
+        result.found > 0
+          ? `Se encontraron ${result.found} transferencias USDT confirmadas.`
+          : "No se encontraron transferencias USDT confirmadas.",
 
       result,
     });
@@ -79,7 +100,7 @@ export async function POST() {
           "INTERNAL_SERVER_ERROR",
 
         message:
-          "No se pudieron sincronizar los depósitos.",
+          "No se pudo consultar el estado on-chain de la wallet.",
       },
       {
         status:

@@ -11,6 +11,7 @@ import type {
 } from "./tron.types";
 
 import type {
+  TronSystemWalletCode,
   TronSystemWalletDocument,
 } from "./tron-system-wallet.types";
 
@@ -19,7 +20,9 @@ let indexesReady =
 
 async function ensureIndexes():
   Promise<void> {
-  if (indexesReady) {
+  if (
+    indexesReady
+  ) {
     return;
   }
 
@@ -28,11 +31,15 @@ async function ensureIndexes():
 
   await collection.createIndex(
     {
-      code: 1,
-      network: 1,
+      code:
+        1,
+
+      network:
+        1,
     },
     {
-      unique: true,
+      unique:
+        true,
 
       name:
         "tron_system_wallet_code_network_unique",
@@ -41,10 +48,12 @@ async function ensureIndexes():
 
   await collection.createIndex(
     {
-      addressBase58: 1,
+      addressBase58:
+        1,
     },
     {
-      unique: true,
+      unique:
+        true,
 
       name:
         "tron_system_wallet_address_unique",
@@ -56,11 +65,21 @@ async function ensureIndexes():
 }
 
 export class TronSystemWalletRepository {
-  async findHotWallet(
+  /*
+   * ============================================================
+   * GENÉRICO
+   * ============================================================
+   */
+
+  async findByCode(
+    code:
+      TronSystemWalletCode,
+
     network:
       TronNetwork,
   ): Promise<
-    TronSystemWalletDocument | null
+    TronSystemWalletDocument |
+    null
   > {
     await ensureIndexes();
 
@@ -68,15 +87,17 @@ export class TronSystemWalletRepository {
       await getTronSystemWalletsCollection();
 
     return collection.findOne({
-      code:
-        "HOT_WALLET",
+      code,
 
       network,
     });
   }
 
-  async createHotWallet(
+  async createSystemWallet(
     input: {
+      code:
+        TronSystemWalletCode;
+
       network:
         TronNetwork;
 
@@ -101,7 +122,164 @@ export class TronSystemWalletRepository {
       new Date();
 
     const document:
-      TronSystemWalletDocument = {
+      TronSystemWalletDocument =
+        {
+          code:
+            input.code,
+
+          network:
+            input.network,
+
+          addressBase58:
+            input.addressBase58,
+
+          addressHex:
+            input.addressHex,
+
+          encryptedPrivateKey:
+            input.encryptedPrivateKey,
+
+          status:
+            "ACTIVE",
+
+          createdAt:
+            now,
+
+          updatedAt:
+            now,
+        };
+
+    try {
+      const result =
+        await collection.insertOne(
+          document,
+        );
+
+      return {
+        ...document,
+
+        _id:
+          result.insertedId,
+      };
+    } catch (
+      error
+    ) {
+      if (
+        error instanceof
+          MongoServerError &&
+        error.code ===
+          11000
+      ) {
+        const existing =
+          await this.findByCode(
+            input.code,
+            input.network,
+          );
+
+        if (
+          existing
+        ) {
+          return existing;
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /*
+   * ============================================================
+   * PLATFORM TREASURY
+   * ============================================================
+   */
+
+  async findPlatformTreasury(
+    network:
+      TronNetwork,
+  ): Promise<
+    TronSystemWalletDocument |
+    null
+  > {
+    return this.findByCode(
+      "PLATFORM_TREASURY",
+      network,
+    );
+  }
+
+  async createPlatformTreasury(
+    input: {
+      network:
+        TronNetwork;
+
+      addressBase58:
+        string;
+
+      addressHex:
+        string;
+
+      encryptedPrivateKey:
+        string;
+    },
+  ): Promise<
+    TronSystemWalletDocument
+  > {
+    return this.createSystemWallet({
+      code:
+        "PLATFORM_TREASURY",
+
+      network:
+        input.network,
+
+      addressBase58:
+        input.addressBase58,
+
+      addressHex:
+        input.addressHex,
+
+      encryptedPrivateKey:
+        input.encryptedPrivateKey,
+    });
+  }
+
+  /*
+   * ============================================================
+   * HOT WALLET LEGACY
+   * ============================================================
+   *
+   * Se mantiene por compatibilidad temporal.
+   */
+
+  async findHotWallet(
+    network:
+      TronNetwork,
+  ): Promise<
+    TronSystemWalletDocument |
+    null
+  > {
+    return this.findByCode(
+      "HOT_WALLET",
+      network,
+    );
+  }
+
+  async createHotWallet(
+    input: {
+      network:
+        TronNetwork;
+
+      addressBase58:
+        string;
+
+      addressHex:
+        string;
+
+      encryptedPrivateKey:
+        string;
+    },
+  ): Promise<
+    TronSystemWalletDocument
+  > {
+    return this.createSystemWallet({
       code:
         "HOT_WALLET",
 
@@ -116,47 +294,6 @@ export class TronSystemWalletRepository {
 
       encryptedPrivateKey:
         input.encryptedPrivateKey,
-
-      status:
-        "ACTIVE",
-
-      createdAt:
-        now,
-
-      updatedAt:
-        now,
-    };
-
-    try {
-      const result =
-        await collection.insertOne(
-          document,
-        );
-
-      return {
-        ...document,
-
-        _id:
-          result.insertedId,
-      };
-    } catch (error) {
-      if (
-        error instanceof
-          MongoServerError &&
-        error.code ===
-          11000
-      ) {
-        const existing =
-          await this.findHotWallet(
-            input.network,
-          );
-
-        if (existing) {
-          return existing;
-        }
-      }
-
-      throw error;
-    }
+    });
   }
 }

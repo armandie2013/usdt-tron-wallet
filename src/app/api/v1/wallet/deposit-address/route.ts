@@ -3,62 +3,223 @@ import {
 } from "next/server";
 
 import {
+  cookies,
+} from "next/headers";
+
+import {
   AppError,
 } from "@/lib/errors/app-error";
 
 import {
-  requireUser,
-} from "@/modules/auth/auth.guard";
+  ACCESS_TOKEN_COOKIE,
+  verifyAccessToken,
+} from "@/modules/auth/auth.tokens";
 
 import {
   TronService,
 } from "@/modules/blockchain/tron/tron.service";
 
-export const runtime =
-  "nodejs";
+import {
+  getUsdtTrc20Contract,
+} from "@/modules/blockchain/tron/usdt.contract";
 
-const tronService =
-  new TronService();
+/*
+ * ============================================================
+ * AUTENTICACIÓN
+ * ============================================================
+ */
+
+async function getAuthenticatedUserId():
+  Promise<string> {
+  const cookieStore =
+    await cookies();
+
+  const accessToken =
+    cookieStore
+      .get(
+        ACCESS_TOKEN_COOKIE,
+      )
+      ?.value;
+
+  if (
+    !accessToken
+  ) {
+    throw new AppError(
+      "No autenticado.",
+      "UNAUTHORIZED",
+      401,
+    );
+  }
+
+  try {
+    const payload =
+      await verifyAccessToken(
+        accessToken,
+      );
+
+    if (
+      !payload.sub
+    ) {
+      throw new Error(
+        "Token sin identificador de usuario.",
+      );
+    }
+
+    return payload.sub;
+  } catch {
+    throw new AppError(
+      "La sesión no es válida o ha expirado.",
+      "INVALID_ACCESS_TOKEN",
+      401,
+    );
+  }
+}
+
+/*
+ * ============================================================
+ * GET /api/v1/wallet/deposit-address
+ * ============================================================
+ *
+ * IMPORTANTE:
+ *
+ * Este endpoint ya NO:
+ *
+ * - crea wallets;
+ * - genera private keys;
+ * - cifra private keys;
+ * - guarda private keys;
+ *
+ * Solamente devuelve la dirección pública que el usuario
+ * ya registró previamente desde su navegador.
+ */
 
 export async function GET() {
   try {
-    const user =
-      await requireUser();
+    const userId =
+      await getAuthenticatedUserId();
+
+    const tronService =
+      new TronService();
 
     const account =
       await tronService
-        .getOrCreateAccountForUser(
-          user.id,
+        .getPublicAddress(
+          userId,
         );
 
-    return NextResponse.json({
-      success:
-        true,
+    /*
+     * --------------------------------------------------------
+     * Usuario todavía sin wallet
+     * --------------------------------------------------------
+     *
+     * Esto NO es un error del servidor.
+     *
+     * Significa que el frontend debe:
+     *
+     * 1. generar la wallet localmente;
+     * 2. cifrarla en IndexedDB;
+     * 3. pedir confirmación de backup;
+     * 4. registrar la address mediante
+     *    POST /api/v1/wallet/register-address
+     */
 
-      deposit: {
+    if (
+      !account
+    ) {
+      return NextResponse.json(
+        {
+          success:
+            true,
+
+          wallet:
+            null,
+
+          needsWalletSetup:
+            true,
+
+          network:
+            tronService
+              .getNetwork(),
+
+          asset:
+            "USDT",
+
+          tokenStandard:
+            "TRC20",
+
+          contractAddress:
+            getUsdtTrc20Contract(),
+        },
+        {
+          status:
+            200,
+        },
+      );
+    }
+
+    /*
+     * --------------------------------------------------------
+     * Wallet existente
+     * --------------------------------------------------------
+     */
+
+    return NextResponse.json(
+      {
+        success:
+          true,
+
+        needsWalletSetup:
+          false,
+
+        network:
+          account.network,
+
         asset:
           "USDT",
 
-        network:
+        tokenStandard:
           "TRC20",
 
-        tronNetwork:
-          account.network,
+        contractAddress:
+          getUsdtTrc20Contract(),
 
-        address:
-          account.address,
+        wallet: {
+          id:
+            account.id,
 
-        addressHex:
-          account.addressHex,
+          address:
+            account.addressBase58,
 
-        qrDataUrl:
-          account.qrDataUrl,
+          addressBase58:
+            account.addressBase58,
 
-        createdAt:
-          account.createdAt,
+          addressHex:
+            account.addressHex,
+
+          walletType:
+            account.walletType,
+
+          status:
+            account.status,
+
+          createdAt:
+            account.createdAt,
+        },
       },
-    });
-  } catch (error) {
+      {
+        status:
+          200,
+      },
+    );
+  } catch (
+    error
+  ) {
+    /*
+     * ========================================================
+     * ERRORES CONTROLADOS
+     * ========================================================
+     */
+
     if (
       error instanceof
       AppError
@@ -68,7 +229,7 @@ export async function GET() {
           success:
             false,
 
-          error:
+          code:
             error.code,
 
           message:
@@ -81,8 +242,14 @@ export async function GET() {
       );
     }
 
+    /*
+     * ========================================================
+     * ERROR INESPERADO
+     * ========================================================
+     */
+
     console.error(
-      "[GET /api/v1/wallet/deposit-address]",
+      "[WALLET DEPOSIT ADDRESS]",
       error,
     );
 
@@ -91,11 +258,11 @@ export async function GET() {
         success:
           false,
 
-        error:
+        code:
           "INTERNAL_SERVER_ERROR",
 
         message:
-          "No se pudo obtener la dirección de depósito.",
+          "No se pudo obtener la dirección TRON.",
       },
       {
         status:

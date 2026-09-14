@@ -7,12 +7,20 @@ import {
 } from "@/lib/money/usdt";
 
 import {
+  generatePlatformWallet,
+} from "@/lib/wallet/tron-platform-wallet.server";
+
+import {
   TronClient,
 } from "./tron.client";
 
 import {
   TronSystemWalletRepository,
 } from "./tron-system-wallet.repository";
+
+import type {
+  TronSystemWalletDocument,
+} from "./tron-system-wallet.types";
 
 import type {
   TronNetwork,
@@ -26,6 +34,12 @@ export class TronSystemWalletService {
   private readonly repository =
     new TronSystemWalletRepository();
 
+  /*
+   * ============================================================
+   * RED
+   * ============================================================
+   */
+
   private getNetwork():
     TronNetwork {
     return process.env
@@ -37,81 +51,212 @@ export class TronSystemWalletService {
       : "NILE";
   }
 
-  async getOrCreateHotWallet() {
+  /*
+   * ============================================================
+   * PLATFORM TREASURY
+   * ============================================================
+   *
+   * La Platform Wallet pertenece a la empresa.
+   *
+   * Se genera utilizando:
+   *
+   * BIP-39
+   *   ↓
+   * mnemonic de 12 palabras
+   *   ↓
+   * BIP-44 TRON
+   *   ↓
+   * m/44'/195'/0'/0/0
+   *   ↓
+   * private key
+   *   ↓
+   * address TRON
+   *
+   * La mnemonic:
+   *
+   * - NO se cifra;
+   * - NO se almacena;
+   * - NO se escribe en MongoDB;
+   * - solamente se devuelve cuando la wallet acaba
+   *   de ser creada.
+   *
+   * La private key:
+   *
+   * - existe temporalmente en memoria;
+   * - se cifra antes de persistir;
+   * - MongoDB recibe únicamente encryptedPrivateKey.
+   */
+
+  async getOrCreatePlatformTreasury() {
     const network =
       this.getNetwork();
 
     const existing =
       await this.repository
-        .findHotWallet(
+        .findPlatformTreasury(
           network,
         );
 
-    if (existing) {
-      return this.toPublic(
-        existing,
-      );
+    /*
+     * Si ya existe, nunca podemos volver
+     * a entregar la mnemonic porque no
+     * está almacenada.
+     */
+    if (
+      existing
+    ) {
+      return {
+        ...this.toPublic(
+          existing,
+        ),
+
+        createdNow:
+          false,
+
+        recovery:
+          null,
+      };
     }
 
     /*
-     * Generación completamente local.
-     * La private key solamente existe en memoria
-     * hasta ser cifrada.
+     * Generación server-side.
+     *
+     * La mnemonic y la private key existen
+     * únicamente en memoria durante esta
+     * operación.
      */
-    const account =
-      await TronClient
-        .create()
-        .createAccount();
+    const generated =
+      generatePlatformWallet();
 
     const encryptedPrivateKey =
-  encryptValue(
-    account.privateKey,
-  );
+      encryptValue(
+        generated.privateKey,
+      );
 
     const created =
       await this.repository
-        .createHotWallet({
+        .createPlatformTreasury({
           network,
 
           addressBase58:
-            account.address.base58,
+            generated.addressBase58,
 
           addressHex:
-            account.address.hex,
+            generated.addressHex,
 
           encryptedPrivateKey,
         });
 
-    return this.toPublic(
-      created,
-    );
+    /*
+     * ==========================================================
+     * PROTECCIÓN DE CONCURRENCIA
+     * ==========================================================
+     *
+     * El repositorio puede encontrar una wallet ya creada
+     * si dos solicitudes intentaron crear PLATFORM_TREASURY
+     * prácticamente al mismo tiempo.
+     *
+     * En ese caso NO debemos devolver las 12 palabras de la
+     * wallet temporal que acabamos de generar, porque esa wallet
+     * no es la que quedó persistida.
+     */
+    const createdNow =
+      created.addressBase58 ===
+      generated.addressBase58;
+
+    if (
+      !createdNow
+    ) {
+      return {
+        ...this.toPublic(
+          created,
+        ),
+
+        createdNow:
+          false,
+
+        recovery:
+          null,
+      };
+    }
+
+    /*
+     * Solamente en este punto sabemos que:
+     *
+     * 1. la wallet generada es la que quedó en MongoDB;
+     * 2. podemos entregar su recovery phrase;
+     * 3. esta es la única oportunidad para respaldarla.
+     */
+    return {
+      ...this.toPublic(
+        created,
+      ),
+
+      createdNow:
+        true,
+
+      recovery: {
+        mnemonic:
+          generated.mnemonic,
+
+        derivationPath:
+          generated.derivationPath,
+      },
+    };
   }
 
-  async getHotWalletStatus() {
+  /*
+   * ============================================================
+   * ESTADO PLATFORM TREASURY
+   * ============================================================
+   */
+
+  async getPlatformTreasuryStatus() {
     const network =
       this.getNetwork();
 
     const wallet =
       await this.repository
-        .findHotWallet(
+        .findPlatformTreasury(
           network,
         );
 
-    if (!wallet) {
+    if (
+      !wallet
+    ) {
       return null;
     }
 
-    /*
-     * Instancia independiente porque setAddress()
-     * modifica el estado interno de TronWeb.
-     */
+    return this.getWalletStatus(
+      wallet,
+    );
+  }
+
+  /*
+   * ============================================================
+   * ESTADO ON-CHAIN
+   * ============================================================
+   */
+
+  private async getWalletStatus(
+    wallet:
+      TronSystemWalletDocument,
+  ) {
     const tronWeb =
-      TronClient.createForAddress(
-        wallet.addressBase58,
-      );
+      TronClient
+        .createForAddress(
+          wallet.addressBase58,
+        );
+
+    /*
+     * ========================================================
+     * ACTIVACIÓN
+     * ========================================================
+     */
 
     const account =
-      await tronWeb.trx
+      await tronWeb
+        .trx
         .getAccount(
           wallet.addressBase58,
         );
@@ -125,8 +270,15 @@ export class TronSystemWalletService {
           account,
       );
 
+    /*
+     * ========================================================
+     * TRX
+     * ========================================================
+     */
+
     const trxBalanceNumber =
-      await tronWeb.trx
+      await tronWeb
+        .trx
         .getBalance(
           wallet.addressBase58,
         );
@@ -145,6 +297,93 @@ export class TronSystemWalletService {
       BigInt(
         trxBalanceNumber,
       );
+
+    /*
+     * ========================================================
+     * RECURSOS TRON
+     * ========================================================
+     *
+     * Bandwidth disponible:
+     *
+     * freeNetLimit - freeNetUsed
+     * +
+     * NetLimit - NetUsed
+     *
+     * Energy disponible:
+     *
+     * EnergyLimit - EnergyUsed
+     */
+
+    const resourceData =
+      await tronWeb
+        .trx
+        .getAccountResources(
+          wallet.addressBase58,
+        );
+
+    const freeBandwidthLimit =
+      this.resourceToBigInt(
+        resourceData
+          .freeNetLimit,
+      );
+
+    const freeBandwidthUsed =
+      this.resourceToBigInt(
+        resourceData
+          .freeNetUsed,
+      );
+
+    const stakedBandwidthLimit =
+      this.resourceToBigInt(
+        resourceData
+          .NetLimit,
+      );
+
+    const stakedBandwidthUsed =
+      this.resourceToBigInt(
+        resourceData
+          .NetUsed,
+      );
+
+    const energyLimit =
+      this.resourceToBigInt(
+        resourceData
+          .EnergyLimit,
+      );
+
+    const energyUsed =
+      this.resourceToBigInt(
+        resourceData
+          .EnergyUsed,
+      );
+
+    const freeBandwidthAvailable =
+      this.nonNegative(
+        freeBandwidthLimit -
+          freeBandwidthUsed,
+      );
+
+    const stakedBandwidthAvailable =
+      this.nonNegative(
+        stakedBandwidthLimit -
+          stakedBandwidthUsed,
+      );
+
+    const bandwidthAvailable =
+      freeBandwidthAvailable +
+      stakedBandwidthAvailable;
+
+    const energyAvailable =
+      this.nonNegative(
+        energyLimit -
+          energyUsed,
+      );
+
+    /*
+     * ========================================================
+     * USDT
+     * ========================================================
+     */
 
     const contractAddress =
       getUsdtTrc20Contract();
@@ -171,6 +410,12 @@ export class TronSystemWalletService {
         usdtResult.toString(),
       );
 
+    /*
+     * ========================================================
+     * RESULTADO
+     * ========================================================
+     */
+
     return {
       ...this.toPublic(
         wallet,
@@ -180,7 +425,8 @@ export class TronSystemWalletService {
 
       trx: {
         balanceSun:
-          trxBalanceSun.toString(),
+          trxBalanceSun
+            .toString(),
 
         formattedBalance:
           this.formatTrx(
@@ -193,41 +439,148 @@ export class TronSystemWalletService {
           contractAddress,
 
         balanceUnits:
-          usdtBalanceUnits.toString(),
+          usdtBalanceUnits
+            .toString(),
 
         formattedBalance:
           formatUsdtDisplay(
             usdtBalanceUnits,
           ),
       },
+
+      resources: {
+        energyAvailable:
+          energyAvailable
+            .toString(),
+
+        energyLimit:
+          energyLimit
+            .toString(),
+
+        energyUsed:
+          energyUsed
+            .toString(),
+
+        bandwidthAvailable:
+          bandwidthAvailable
+            .toString(),
+
+        freeBandwidthAvailable:
+          freeBandwidthAvailable
+            .toString(),
+
+        stakedBandwidthAvailable:
+          stakedBandwidthAvailable
+            .toString(),
+
+        freeBandwidthLimit:
+          freeBandwidthLimit
+            .toString(),
+
+        freeBandwidthUsed:
+          freeBandwidthUsed
+            .toString(),
+
+        stakedBandwidthLimit:
+          stakedBandwidthLimit
+            .toString(),
+
+        stakedBandwidthUsed:
+          stakedBandwidthUsed
+            .toString(),
+      },
     };
   }
 
+  /*
+   * ============================================================
+   * HOT WALLET LEGACY
+   * ============================================================
+   *
+   * Se conserva temporalmente por compatibilidad.
+   *
+   * No utilizar para nuevas operaciones de plataforma.
+   */
+
+  async getOrCreateHotWallet() {
+    const network =
+      this.getNetwork();
+
+    const existing =
+      await this.repository
+        .findHotWallet(
+          network,
+        );
+
+    if (
+      existing
+    ) {
+      return this.toPublic(
+        existing,
+      );
+    }
+
+    const account =
+      await TronClient
+        .create()
+        .createAccount();
+
+    const encryptedPrivateKey =
+      encryptValue(
+        account.privateKey,
+      );
+
+    const created =
+      await this.repository
+        .createHotWallet({
+          network,
+
+          addressBase58:
+            account.address
+              .base58,
+
+          addressHex:
+            account.address
+              .hex,
+
+          encryptedPrivateKey,
+        });
+
+    return this.toPublic(
+      created,
+    );
+  }
+
+  async getHotWalletStatus() {
+    const network =
+      this.getNetwork();
+
+    const wallet =
+      await this.repository
+        .findHotWallet(
+          network,
+        );
+
+    if (
+      !wallet
+    ) {
+      return null;
+    }
+
+    return this.getWalletStatus(
+      wallet,
+    );
+  }
+
+  /*
+   * ============================================================
+   * REPRESENTACIÓN PÚBLICA
+   * ============================================================
+   */
+
   private toPublic(
-    wallet: {
-      _id?: {
-        toString():
-          string;
-      };
-
-      code:
-        "HOT_WALLET";
-
-      network:
-        TronNetwork;
-
-      addressBase58:
-        string;
-
-      addressHex:
-        string;
-
-      status:
-        "ACTIVE" | "DISABLED";
-
-      createdAt:
-        Date;
-    },
+    wallet:
+      TronSystemWalletDocument,
   ) {
     return {
       id:
@@ -253,8 +606,88 @@ export class TronSystemWalletService {
       createdAt:
         wallet.createdAt
           .toISOString(),
+
+      updatedAt:
+        wallet.updatedAt
+          .toISOString(),
     };
   }
+
+  /*
+   * ============================================================
+   * HELPERS RECURSOS
+   * ============================================================
+   */
+
+  private resourceToBigInt(
+    value:
+      unknown,
+  ): bigint {
+    if (
+      value ===
+        undefined ||
+      value ===
+        null
+    ) {
+      return 0n;
+    }
+
+    if (
+      typeof value ===
+        "bigint"
+    ) {
+      return value;
+    }
+
+    if (
+      typeof value ===
+        "number"
+    ) {
+      if (
+        !Number.isSafeInteger(
+          value,
+        )
+      ) {
+        throw new Error(
+          "Un recurso TRON excede el rango entero seguro de JavaScript.",
+        );
+      }
+
+      return BigInt(
+        value,
+      );
+    }
+
+    if (
+      typeof value ===
+        "string" &&
+      /^\d+$/.test(
+        value,
+      )
+    ) {
+      return BigInt(
+        value,
+      );
+    }
+
+    return 0n;
+  }
+
+  private nonNegative(
+    value:
+      bigint,
+  ): bigint {
+    return value <
+      0n
+      ? 0n
+      : value;
+  }
+
+  /*
+   * ============================================================
+   * FORMATO TRX
+   * ============================================================
+   */
 
   private formatTrx(
     amountSun:

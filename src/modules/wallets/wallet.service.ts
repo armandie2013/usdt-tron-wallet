@@ -3,81 +3,137 @@ import {
 } from "@/lib/errors/app-error";
 
 import {
-  formatUsdtDisplay,
-} from "@/lib/money/usdt";
+  TronAccountRepository,
+} from "@/modules/blockchain/tron/tron-account.repository";
 
 import {
-  LedgerService,
-} from "@/modules/ledger/ledger.service";
+  TronService,
+} from "@/modules/blockchain/tron/tron.service";
 
-import {
-  WalletRepository,
-} from "./wallet.repository";
+import type {
+  TronNetwork,
+} from "@/modules/blockchain/tron/tron.types";
 
 import type {
   PublicWalletAccount,
 } from "./wallet.types";
 
 export class WalletService {
-  private readonly repository =
-    new WalletRepository();
+  private readonly accounts =
+    new TronAccountRepository();
 
-  private readonly ledger =
-    new LedgerService();
+  private readonly tron =
+    new TronService();
+
+  /*
+   * ==========================================================
+   * RED
+   * ==========================================================
+   */
+
+  private getNetwork():
+    TronNetwork {
+    const value =
+      process.env
+        .TRON_NETWORK
+        ?.trim()
+        .toLowerCase();
+
+    return value ===
+      "mainnet"
+      ? "MAINNET"
+      : "NILE";
+  }
+
+  /*
+   * ==========================================================
+   * WALLET DEL USUARIO
+   * ==========================================================
+   *
+   * Fuente de verdad:
+   *
+   * - dirección pública TRON registrada;
+   * - saldo USDT real consultado on-chain.
+   */
 
   async getUserWallet(
-    userId: string,
-  ): Promise<PublicWalletAccount> {
-    const wallet =
-      await this.repository
-        .getOrCreateUserWallet(
+    userId:
+      string,
+  ): Promise<
+    PublicWalletAccount
+  > {
+    const network =
+      this.getNetwork();
+
+    const account =
+      await this.accounts
+        .findByUserId(
           userId,
-          "USDT",
+          network,
         );
 
     if (
-      !wallet._id ||
-      !wallet.userId
+      !account ||
+      !account._id
     ) {
       throw new AppError(
-        "La cuenta de billetera no posee un identificador válido.",
-        "INVALID_WALLET_ACCOUNT",
-        500,
+        "El usuario no posee una wallet TRON registrada.",
+        "TRON_ACCOUNT_NOT_FOUND",
+        404,
+      );
+    }
+
+    if (
+      account.status !==
+      "ACTIVE"
+    ) {
+      throw new AppError(
+        "La wallet TRON del usuario no se encuentra activa.",
+        "TRON_ACCOUNT_DISABLED",
+        409,
       );
     }
 
     const balance =
-      await this.ledger
-        .getBalance(
-          wallet._id.toString(),
+      await this.tron
+        .getUsdtBalance(
+          account
+            .addressBase58,
         );
+
+    /*
+     * El campo "id" corresponde al documento
+     * público TronAccount.
+     */
 
     return {
       id:
-        wallet._id.toString(),
+        account._id
+          .toString(),
 
       userId:
-        wallet.userId.toString(),
+        account.userId
+          .toString(),
 
       asset:
-        wallet.asset,
+        "USDT",
 
       status:
-        wallet.status,
+        account.status,
 
       balance:
-        balance.toString(),
+        balance.balanceUnits,
 
       formattedBalance:
-        formatUsdtDisplay(
-          balance,
-        ),
+        balance.formattedBalance,
 
       createdAt:
-        wallet.createdAt.toISOString(),
+        account.createdAt
+          .toISOString(),
 
       updatedAt:
-        wallet.updatedAt.toISOString(),
+        account.updatedAt
+          .toISOString(),
     };
   }
 }

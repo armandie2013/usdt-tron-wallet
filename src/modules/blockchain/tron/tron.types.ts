@@ -2,21 +2,73 @@ import type {
   ObjectId,
 } from "mongodb";
 
+/*
+ * ============================================================
+ * RED TRON
+ * ============================================================
+ */
+
 export type TronNetwork =
   | "NILE"
   | "MAINNET";
 
-export interface TronTransferResult {
-  txHash: string;
-}
+/*
+ * ============================================================
+ * TIPO DE WALLET
+ * ============================================================
+ *
+ * A partir de esta migración, las wallets de usuarios
+ * son explícitamente NO-CUSTODIAL.
+ *
+ * El backend:
+ *
+ * - conoce la dirección pública;
+ * - puede consultar balances;
+ * - puede consultar transacciones;
+ * - puede asociar una dirección a un usuario;
+ *
+ * pero NO posee:
+ *
+ * - private key;
+ * - mnemonic;
+ * - seed;
+ * - material secreto de firma.
+ */
+
+export type TronWalletType =
+  "NON_CUSTODIAL";
+
+/*
+ * ============================================================
+ * ESTADO DE CUENTA TRON
+ * ============================================================
+ */
+
+export type TronAccountStatus =
+  | "ACTIVE"
+  | "DISABLED";
+
+/*
+ * ============================================================
+ * DOCUMENTO TRON ACCOUNT
+ * ============================================================
+ *
+ * Este es el modelo persistido en MongoDB para las
+ * direcciones TRON pertenecientes a usuarios.
+ *
+ * IMPORTANTE:
+ *
+ * encryptedPrivateKey fue eliminado intencionalmente.
+ *
+ * Una cuenta de usuario NO debe volver a almacenar
+ * claves privadas en el servidor.
+ */
 
 export interface TronAccountDocument {
-  _id?: ObjectId;
-
-  userId:
+  _id?:
     ObjectId;
 
-  walletAccountId:
+  userId:
     ObjectId;
 
   network:
@@ -28,8 +80,11 @@ export interface TronAccountDocument {
   addressHex:
     string;
 
-  encryptedPrivateKey:
-    string;
+  walletType:
+    TronWalletType;
+
+  status:
+    TronAccountStatus;
 
   createdAt:
     Date;
@@ -38,30 +93,44 @@ export interface TronAccountDocument {
     Date;
 }
 
-export interface PublicTronAccount {
-  id: string;
+/*
+ * ============================================================
+ * CREACIÓN DE CUENTA
+ * ============================================================
+ *
+ * Este tipo se utiliza cuando el frontend registra
+ * en el backend una wallet creada localmente.
+ *
+ * Solo contiene información pública.
+ */
+
+export interface CreateTronAccountInput {
+  userId:
+    string;
 
   network:
     TronNetwork;
 
-  address:
+  addressBase58:
     string;
 
   addressHex:
     string;
-
-  qrDataUrl:
-    string;
-
-  createdAt:
-    string;
 }
 
-export interface CreateTronAccountData {
-  userId:
+/*
+ * ============================================================
+ * RESPUESTA PÚBLICA
+ * ============================================================
+ *
+ * Este tipo puede devolverse sin riesgo desde la API.
+ */
+
+export interface TronAccountPublic {
+  id:
     string;
 
-  walletAccountId:
+  userId:
     string;
 
   network:
@@ -73,36 +142,78 @@ export interface CreateTronAccountData {
   addressHex:
     string;
 
-  encryptedPrivateKey:
+  walletType:
+    TronWalletType;
+
+  status:
+    TronAccountStatus;
+
+  createdAt:
+    string;
+
+  updatedAt:
     string;
 }
 
-export interface TronBlockchainStatus {
-  network:
-    TronNetwork;
+/*
+ * ============================================================
+ * DATOS PÚBLICOS DE BALANCE
+ * ============================================================
+ *
+ * El saldo real NO vive en MongoDB.
+ *
+ * Se obtiene desde la blockchain.
+ */
 
-  address:
+export interface TronUsdtBalance {
+  balanceUnits:
     string;
 
-  activated:
-    boolean;
+  formattedBalance:
+    string;
+}
 
-  trx: {
-    balanceSun:
-      string;
+export interface TronTrxBalance {
+  balanceSun:
+    string;
 
-    formattedBalance:
-      string;
-  };
+  formattedBalance:
+    string;
+}
 
-  usdt: {
-    contract:
-      string;
+/*
+ * ============================================================
+ * RECURSOS DE RED
+ * ============================================================
+ */
 
-    balanceUnits:
-      string;
+export interface TronResourceStatus {
+  energyAvailable:
+    string;
 
-    formattedBalance:
-      string;
-  };
+  bandwidthAvailable:
+    string;
+}
+
+/*
+ * ============================================================
+ * ESTADO COMPLETO DE WALLET
+ * ============================================================
+ *
+ * Este objeto representa lo que puede consultar
+ * nuestra aplicación sobre una wallet pública.
+ */
+
+export interface TronWalletStatus {
+  account:
+    TronAccountPublic;
+
+  usdt:
+    TronUsdtBalance;
+
+  trx:
+    TronTrxBalance;
+
+  resources:
+    TronResourceStatus;
 }

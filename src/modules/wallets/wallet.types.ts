@@ -1,62 +1,64 @@
-import type {
-  ObjectId,
-} from "mongodb";
-
 export type WalletAsset =
   "USDT";
 
-export type WalletStatus =
-  | "ACTIVE"
-  | "FROZEN"
-  | "DISABLED";
-
-export type WalletOwnerType =
-  | "USER"
-  | "SYSTEM";
-
-export type SystemWalletCode =
-  | "EXTERNAL_CLEARING"
-  | "TREASURY"
-  | "FEES";
-
-export interface WalletAccountDocument {
-  _id?: ObjectId;
-
-  ownerType:
-    WalletOwnerType;
-
-  userId?: ObjectId;
-
-  systemCode?:
-    SystemWalletCode;
-
-  asset:
-    WalletAsset;
-
-  status:
-    WalletStatus;
-
-  createdAt:
-    Date;
-
-  updatedAt:
-    Date;
-}
+/*
+ * ============================================================
+ * WALLET PÚBLICA
+ * ============================================================
+ *
+ * Este módulo ya no representa cuentas contables internas.
+ *
+ * PublicWalletAccount es solamente un contrato de salida
+ * utilizado por la aplicación para representar la wallet
+ * pública TRON del usuario.
+ *
+ * El saldo proviene directamente de TRON.
+ */
 
 export interface PublicWalletAccount {
-  id: string;
+  /*
+   * ID del documento público TronAccount.
+   */
+  id:
+    string;
 
-  userId: string;
+  userId:
+    string;
 
   asset:
     WalletAsset;
 
+  /*
+   * Estado público de la cuenta TRON.
+   *
+   * Lo mantenemos como string porque el documento recuperado
+   * actualmente expone status con ese tipo.
+   *
+   * La validación específica de estados pertenece al módulo
+   * blockchain/TRON, no a este DTO de compatibilidad.
+   */
   status:
-    WalletStatus;
+    string;
 
+  /*
+   * Saldo expresado en las unidades mínimas de USDT.
+   *
+   * USDT utiliza 6 decimales.
+   *
+   * Ejemplo:
+   *
+   * 12500000 = 12.5 USDT
+   */
   balance:
     string;
 
+  /*
+   * Representación lista para mostrar.
+   *
+   * Ejemplo:
+   *
+   * "12.5"
+   */
   formattedBalance:
     string;
 

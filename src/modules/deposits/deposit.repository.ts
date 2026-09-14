@@ -15,6 +15,12 @@ import {
   getBlockchainDepositsCollection,
 } from "./deposit.model";
 
+/*
+ * ============================================================
+ * ÍNDICES
+ * ============================================================
+ */
+
 let indexesReady =
   false;
 
@@ -27,6 +33,10 @@ async function ensureIndexes():
   const collection =
     await getBlockchainDepositsCollection();
 
+  /*
+   * Un evento concreto del contrato solamente puede
+   * registrarse una vez.
+   */
   await collection.createIndex(
     {
       network:
@@ -55,9 +65,11 @@ async function ensureIndexes():
   );
 
   /*
-   * Mantenemos eventKey único para compatibilidad
-   * con los depósitos que ya procesamos durante
-   * las pruebas anteriores.
+   * Se conserva eventKey único.
+   *
+   * Además de servir para el sincronizador manual,
+   * mantiene compatibilidad con documentos previamente
+   * indexados durante el desarrollo.
    */
   await collection.createIndex(
     {
@@ -73,6 +85,9 @@ async function ensureIndexes():
     },
   );
 
+  /*
+   * Historial del usuario.
+   */
   await collection.createIndex(
     {
       userId:
@@ -87,6 +102,9 @@ async function ensureIndexes():
     },
   );
 
+  /*
+   * Útil para consultas y auditoría por bloque.
+   */
   await collection.createIndex(
     {
       blockNumber:
@@ -102,11 +120,14 @@ async function ensureIndexes():
     true;
 }
 
-export interface SaveCreditedDepositInput {
-  userId:
-    string;
+/*
+ * ============================================================
+ * INPUT DE EVENTO OBSERVADO
+ * ============================================================
+ */
 
-  walletAccountId:
+export interface SaveObservedDepositInput {
+  userId:
     string;
 
   network:
@@ -138,12 +159,25 @@ export interface SaveCreditedDepositInput {
 
   blockTimestamp:
     Date;
-
-  ledgerTransactionId?:
-    string;
 }
 
+/*
+ * ============================================================
+ * REPOSITORY
+ * ============================================================
+ *
+ * Este repositorio ya NO representa dinero interno.
+ *
+ * Su única función es indexar eventos reales de TRON.
+ */
+
 export class DepositRepository {
+  /*
+   * ==========================================================
+   * EXISTE POR EVENT KEY
+   * ==========================================================
+   */
+
   async existsByEventKey(
     eventKey:
       string,
@@ -160,7 +194,8 @@ export class DepositRepository {
         },
         {
           projection: {
-            _id: 1,
+            _id:
+              1,
           },
         },
       );
@@ -169,6 +204,12 @@ export class DepositRepository {
       existing,
     );
   }
+
+  /*
+   * ==========================================================
+   * EXISTE POR EVENTO BLOCKCHAIN
+   * ==========================================================
+   */
 
   async existsByBlockchainEvent(
     network:
@@ -194,7 +235,8 @@ export class DepositRepository {
         },
         {
           projection: {
-            _id: 1,
+            _id:
+              1,
           },
         },
       );
@@ -204,14 +246,103 @@ export class DepositRepository {
     );
   }
 
-  async saveCreditedDeposit(
+  /*
+   * ==========================================================
+   * GUARDAR EVENTO CONFIRMADO
+   * ==========================================================
+   *
+   * Importante:
+   *
+   * guardar este documento NO acredita fondos.
+   *
+   * El USDT ya se encuentra en la dirección del usuario
+   * porque la transferencia ocurrió realmente en TRON.
+   *
+   * MongoDB solamente mantiene un índice/cache del evento.
+   */
+
+  async saveObservedDeposit(
     input:
-      SaveCreditedDepositInput,
+      SaveObservedDepositInput,
   ): Promise<void> {
     await ensureIndexes();
 
     const collection =
       await getBlockchainDepositsCollection();
+
+    /*
+     * Validaciones defensivas antes de tocar MongoDB.
+     */
+
+    if (
+      !ObjectId.isValid(
+        input.userId,
+      )
+    ) {
+      throw new Error(
+        "Invalid userId while indexing blockchain deposit.",
+      );
+    }
+
+    if (
+      !input.txid.trim()
+    ) {
+      throw new Error(
+        "Invalid transaction id while indexing blockchain deposit.",
+      );
+    }
+
+    if (
+      !input.eventKey.trim()
+    ) {
+      throw new Error(
+        "Invalid event key while indexing blockchain deposit.",
+      );
+    }
+
+    if (
+      !Number.isSafeInteger(
+        input.eventIndex,
+      ) ||
+      input.eventIndex <
+        0
+    ) {
+      throw new Error(
+        "Invalid event index while indexing blockchain deposit.",
+      );
+    }
+
+    if (
+      !Number.isSafeInteger(
+        input.blockNumber,
+      ) ||
+      input.blockNumber <
+        0
+    ) {
+      throw new Error(
+        "Invalid block number while indexing blockchain deposit.",
+      );
+    }
+
+    if (
+      input.amountUnits <=
+      0n
+    ) {
+      throw new Error(
+        "Invalid USDT amount while indexing blockchain deposit.",
+      );
+    }
+
+    if (
+      Number.isNaN(
+        input.blockTimestamp
+          .getTime(),
+      )
+    ) {
+      throw new Error(
+        "Invalid block timestamp while indexing blockchain deposit.",
+      );
+    }
 
     const now =
       new Date();
@@ -234,11 +365,6 @@ export class DepositRepository {
             userId:
               new ObjectId(
                 input.userId,
-              ),
-
-            walletAccountId:
-              new ObjectId(
-                input.walletAccountId,
               ),
 
             network:
@@ -277,14 +403,7 @@ export class DepositRepository {
               input.blockTimestamp,
 
             status:
-              "CREDITED",
-
-            ledgerTransactionId:
-              input.ledgerTransactionId
-                ? new ObjectId(
-                    input.ledgerTransactionId,
-                  )
-                : undefined,
+              "CONFIRMED",
 
             createdAt:
               now,
@@ -300,6 +419,16 @@ export class DepositRepository {
         },
       );
     } catch (error) {
+      /*
+       * Dos procesos pueden descubrir simultáneamente
+       * el mismo evento.
+       *
+       * Los índices únicos son la última protección
+       * de idempotencia.
+       *
+       * Si otro proceso lo insertó primero, el resultado
+       * deseado ya fue alcanzado.
+       */
       if (
         error instanceof
           MongoServerError &&
