@@ -121,8 +121,23 @@ interface TronChainParameter {
     number | string;
 }
 
-async function getAuthenticatedUserId():
-  Promise<string> {
+/*
+ * ============================================================
+ * AUTH
+ * ============================================================
+ */
+
+interface AuthenticatedUser {
+  id:
+    string;
+
+  role:
+    "ADMIN"
+    | "USER";
+}
+
+async function getAuthenticatedUser():
+  Promise<AuthenticatedUser> {
   const cookieStore =
     await cookies();
 
@@ -157,7 +172,13 @@ async function getAuthenticatedUserId():
       );
     }
 
-    return payload.sub;
+    return {
+      id:
+        payload.sub,
+
+      role:
+        payload.role,
+    };
   } catch {
     throw new AppError(
       "La sesión no es válida o ha expirado.",
@@ -435,13 +456,52 @@ async function getEnergyPriceSun(
   return value;
 }
 
+/*
+ * ============================================================
+ * POST /api/v1/wallet/transfer-quote
+ * ============================================================
+ *
+ * Solamente USER puede preparar una transferencia desde
+ * su wallet personal.
+ *
+ * ADMIN:
+ *
+ * - no posee wallet personal;
+ * - no puede cotizar transferencias personales;
+ * - no puede preparar operaciones desde una dirección
+ *   asociada históricamente a su usuario.
+ *
+ * La PLATFORM_TREASURY es independiente y tendrá su propio
+ * flujo administrativo cuando corresponda.
+ */
+
 export async function POST(
   request:
     Request,
 ) {
   try {
+    const authenticatedUser =
+      await getAuthenticatedUser();
+
+    /*
+     * ========================================================
+     * ADMIN NO PUEDE COTIZAR TRANSFERENCIA PERSONAL
+     * ========================================================
+     */
+
+    if (
+      authenticatedUser.role ===
+      "ADMIN"
+    ) {
+      throw new AppError(
+        "Las cuentas administradoras no pueden preparar transferencias desde una wallet personal.",
+        "WALLET_NOT_ALLOWED_FOR_ADMIN",
+        403,
+      );
+    }
+
     const userId =
-      await getAuthenticatedUserId();
+      authenticatedUser.id;
 
     let rawBody:
       unknown;

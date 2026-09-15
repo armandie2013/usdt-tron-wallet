@@ -107,8 +107,17 @@ const registerAddressSchema =
  * ============================================================
  */
 
-async function getAuthenticatedUserId():
-  Promise<string> {
+interface AuthenticatedUser {
+  id:
+    string;
+
+  role:
+    "ADMIN"
+    | "USER";
+}
+
+async function getAuthenticatedUser():
+  Promise<AuthenticatedUser> {
   const cookieStore =
     await cookies();
 
@@ -143,7 +152,13 @@ async function getAuthenticatedUserId():
       );
     }
 
-    return payload.sub;
+    return {
+      id:
+        payload.sub,
+
+      role:
+        payload.role,
+    };
   } catch {
     throw new AppError(
       "La sesión no es válida o ha expirado.",
@@ -310,7 +325,20 @@ function normalizeSignature(
  * POST /api/v1/wallet/register-address
  * ============================================================
  *
- * Flujo:
+ * Solamente los usuarios con rol USER pueden registrar
+ * una wallet personal.
+ *
+ * ADMIN:
+ *
+ * - no posee wallet personal;
+ * - no puede registrar una dirección TRON;
+ * - no puede consumir un challenge de propiedad;
+ * - no participa del flujo no-custodial.
+ *
+ * La PLATFORM_TREASURY pertenece a la plataforma y utiliza
+ * endpoints administrativos separados.
+ *
+ * Flujo USER:
  *
  * navegador
  *   ↓
@@ -330,8 +358,28 @@ export async function POST(
     Request,
 ) {
   try {
+    const authenticatedUser =
+      await getAuthenticatedUser();
+
+    /*
+     * ========================================================
+     * ADMIN NO PUEDE REGISTRAR WALLET PERSONAL
+     * ========================================================
+     */
+
+    if (
+      authenticatedUser.role ===
+      "ADMIN"
+    ) {
+      throw new AppError(
+        "Las cuentas administradoras no pueden registrar una wallet personal.",
+        "WALLET_NOT_ALLOWED_FOR_ADMIN",
+        403,
+      );
+    }
+
     const userId =
-      await getAuthenticatedUserId();
+      authenticatedUser.id;
 
     let rawBody:
       unknown;

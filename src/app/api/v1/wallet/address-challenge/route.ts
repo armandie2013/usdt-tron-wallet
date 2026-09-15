@@ -79,8 +79,17 @@ const requestSchema =
  * ============================================================
  */
 
-async function getAuthenticatedUserId():
-  Promise<string> {
+interface AuthenticatedUser {
+  id:
+    string;
+
+  role:
+    "ADMIN"
+    | "USER";
+}
+
+async function getAuthenticatedUser():
+  Promise<AuthenticatedUser> {
   const cookieStore =
     await cookies();
 
@@ -115,7 +124,13 @@ async function getAuthenticatedUserId():
       );
     }
 
-    return payload.sub;
+    return {
+      id:
+        payload.sub,
+
+      role:
+        payload.role,
+    };
   } catch {
     throw new AppError(
       "La sesión no es válida o ha expirado.",
@@ -294,6 +309,19 @@ function buildChallengeMessage(input: {
  * ============================================================
  * POST /api/v1/wallet/address-challenge
  * ============================================================
+ *
+ * Solamente los usuarios USER pueden demostrar propiedad
+ * de una wallet personal.
+ *
+ * ADMIN:
+ *
+ * - no posee wallet personal;
+ * - no puede registrar una dirección TRON;
+ * - no puede crear challenges de propiedad;
+ * - no participa del flujo no-custodial.
+ *
+ * La wallet de plataforma se administra por rutas ADMIN
+ * separadas y no utiliza este endpoint.
  */
 
 export async function POST(
@@ -301,8 +329,28 @@ export async function POST(
     Request,
 ) {
   try {
+    const authenticatedUser =
+      await getAuthenticatedUser();
+
+    /*
+     * ========================================================
+     * ADMIN NO PUEDE CREAR CHALLENGE DE WALLET PERSONAL
+     * ========================================================
+     */
+
+    if (
+      authenticatedUser.role ===
+      "ADMIN"
+    ) {
+      throw new AppError(
+        "Las cuentas administradoras no pueden registrar ni verificar una wallet personal.",
+        "WALLET_NOT_ALLOWED_FOR_ADMIN",
+        403,
+      );
+    }
+
     const userId =
-      await getAuthenticatedUserId();
+      authenticatedUser.id;
 
     let rawBody:
       unknown;

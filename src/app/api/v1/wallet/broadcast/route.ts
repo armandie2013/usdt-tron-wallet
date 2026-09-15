@@ -168,8 +168,17 @@ interface ValidatedSignedTransaction {
  * ============================================================
  */
 
-async function getAuthenticatedUserId():
-  Promise<string> {
+interface AuthenticatedUser {
+  id:
+    string;
+
+  role:
+    "ADMIN"
+    | "USER";
+}
+
+async function getAuthenticatedUser():
+  Promise<AuthenticatedUser> {
   const cookieStore =
     await cookies();
 
@@ -204,7 +213,13 @@ async function getAuthenticatedUserId():
       );
     }
 
-    return payload.sub;
+    return {
+      id:
+        payload.sub,
+
+      role:
+        payload.role,
+    };
   } catch {
     throw new AppError(
       "La sesión no es válida o ha expirado.",
@@ -785,6 +800,22 @@ function validateSignedTransaction(
  * ============================================================
  * POST /api/v1/wallet/broadcast
  * ============================================================
+ *
+ * Solamente USER puede utilizar este relay para retransmitir
+ * una transferencia firmada desde su wallet personal.
+ *
+ * ADMIN:
+ *
+ * - no posee wallet personal;
+ * - no puede retransmitir transacciones personales;
+ * - no puede aprovechar una wallet histórica que hubiera
+ *   quedado asociada accidentalmente a su usuario.
+ *
+ * PLATFORM_TREASURY:
+ *
+ * - es independiente;
+ * - no utiliza este endpoint;
+ * - tendrá su propio flujo administrativo.
  */
 
 export async function POST(
@@ -792,8 +823,28 @@ export async function POST(
     Request,
 ) {
   try {
+    const authenticatedUser =
+      await getAuthenticatedUser();
+
+    /*
+     * ========================================================
+     * ADMIN NO PUEDE HACER BROADCAST DE WALLET PERSONAL
+     * ========================================================
+     */
+
+    if (
+      authenticatedUser.role ===
+      "ADMIN"
+    ) {
+      throw new AppError(
+        "Las cuentas administradoras no pueden transmitir operaciones desde una wallet personal.",
+        "WALLET_NOT_ALLOWED_FOR_ADMIN",
+        403,
+      );
+    }
+
     const userId =
-      await getAuthenticatedUserId();
+      authenticatedUser.id;
 
     let rawBody:
       unknown;

@@ -7,7 +7,7 @@ import {
 } from "@/lib/errors/app-error";
 
 import {
-  requireUser,
+  requireWalletUser,
 } from "@/modules/auth/auth.guard";
 
 import {
@@ -36,12 +36,17 @@ const depositService =
  * - información on-chain.
  *
  * La fuente de verdad es TRON.
+ *
+ * Solamente USER puede sincronizar información
+ * correspondiente a su wallet personal.
+ *
+ * ADMIN no participa del flujo no-custodial.
  */
 
 export async function POST() {
   try {
     const user =
-      await requireUser();
+      await requireWalletUser();
 
     const result =
       await depositService

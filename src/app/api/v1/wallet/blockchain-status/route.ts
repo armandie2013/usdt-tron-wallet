@@ -25,8 +25,17 @@ import {
  * ============================================================
  */
 
-async function getAuthenticatedUserId():
-  Promise<string> {
+interface AuthenticatedUser {
+  id:
+    string;
+
+  role:
+    "ADMIN"
+    | "USER";
+}
+
+async function getAuthenticatedUser():
+  Promise<AuthenticatedUser> {
   const cookieStore =
     await cookies();
 
@@ -61,7 +70,13 @@ async function getAuthenticatedUserId():
       );
     }
 
-    return payload.sub;
+    return {
+      id:
+        payload.sub,
+
+      role:
+        payload.role,
+    };
   } catch {
     throw new AppError(
       "La sesión no es válida o ha expirado.",
@@ -81,12 +96,45 @@ async function getAuthenticatedUserId():
  * Ya no crea wallet.
  * Ya no accede a private keys.
  * Ya no firma transacciones.
+ *
+ * Solamente USER puede consultar el estado de su wallet
+ * personal.
+ *
+ * ADMIN:
+ *
+ * - no posee wallet personal;
+ * - no consulta saldo personal;
+ * - no consulta recursos personales;
+ * - no participa del flujo no-custodial.
+ *
+ * La PLATFORM_TREASURY se consulta mediante endpoints
+ * administrativos separados.
  */
 
 export async function GET() {
   try {
+    const authenticatedUser =
+      await getAuthenticatedUser();
+
+    /*
+     * ========================================================
+     * ADMIN NO POSEE ESTADO DE WALLET PERSONAL
+     * ========================================================
+     */
+
+    if (
+      authenticatedUser.role ===
+      "ADMIN"
+    ) {
+      throw new AppError(
+        "Las cuentas administradoras no poseen una wallet personal.",
+        "WALLET_NOT_ALLOWED_FOR_ADMIN",
+        403,
+      );
+    }
+
     const userId =
-      await getAuthenticatedUserId();
+      authenticatedUser.id;
 
     const tronService =
       new TronService();

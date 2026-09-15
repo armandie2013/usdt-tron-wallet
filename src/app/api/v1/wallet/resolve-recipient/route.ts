@@ -107,8 +107,17 @@ interface UserLookupDocument {
  * ============================================================
  */
 
-async function getAuthenticatedUserId():
-  Promise<string> {
+interface AuthenticatedUser {
+  id:
+    string;
+
+  role:
+    "ADMIN"
+    | "USER";
+}
+
+async function getAuthenticatedUser():
+  Promise<AuthenticatedUser> {
   const cookieStore =
     await cookies();
 
@@ -143,7 +152,13 @@ async function getAuthenticatedUserId():
       );
     }
 
-    return payload.sub;
+    return {
+      id:
+        payload.sub,
+
+      role:
+        payload.role,
+    };
   } catch {
     throw new AppError(
       "La sesión no es válida o ha expirado.",
@@ -177,6 +192,15 @@ function isTronAddress(
  * POST /api/v1/wallet/resolve-recipient
  * ============================================================
  *
+ * Solamente USER puede resolver destinatarios dentro
+ * del flujo de envío de una wallet personal.
+ *
+ * ADMIN:
+ *
+ * - no posee wallet personal;
+ * - no envía fondos;
+ * - no necesita resolver destinatarios para transferencias.
+ *
  * Ejemplos:
  *
  * {
@@ -206,8 +230,28 @@ export async function POST(
     Request,
 ) {
   try {
+    const authenticatedUser =
+      await getAuthenticatedUser();
+
+    /*
+     * ========================================================
+     * ADMIN NO PUEDE RESOLVER DESTINATARIOS DE WALLET PERSONAL
+     * ========================================================
+     */
+
+    if (
+      authenticatedUser.role ===
+      "ADMIN"
+    ) {
+      throw new AppError(
+        "Las cuentas administradoras no pueden utilizar el flujo de transferencias personales.",
+        "WALLET_NOT_ALLOWED_FOR_ADMIN",
+        403,
+      );
+    }
+
     const currentUserId =
-      await getAuthenticatedUserId();
+      authenticatedUser.id;
 
     let rawBody:
       unknown;
@@ -320,7 +364,8 @@ export async function POST(
             internal:
               false,
 
-            user: null,
+            user:
+              null,
           },
         },
         {

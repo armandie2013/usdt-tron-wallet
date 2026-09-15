@@ -29,8 +29,17 @@ import {
  * ============================================================
  */
 
-async function getAuthenticatedUserId():
-  Promise<string> {
+interface AuthenticatedUser {
+  id:
+    string;
+
+  role:
+    "ADMIN"
+    | "USER";
+}
+
+async function getAuthenticatedUser():
+  Promise<AuthenticatedUser> {
   const cookieStore =
     await cookies();
 
@@ -65,7 +74,13 @@ async function getAuthenticatedUserId():
       );
     }
 
-    return payload.sub;
+    return {
+      id:
+        payload.sub,
+
+      role:
+        payload.role,
+    };
   } catch {
     throw new AppError(
       "La sesión no es válida o ha expirado.",
@@ -91,12 +106,44 @@ async function getAuthenticatedUserId():
  *
  * Solamente devuelve la dirección pública que el usuario
  * ya registró previamente desde su navegador.
+ *
+ * Este flujo pertenece exclusivamente a cuentas USER.
+ *
+ * ADMIN:
+ *
+ * - no posee wallet personal;
+ * - no posee dirección personal de depósito;
+ * - no participa del flujo no-custodial;
+ * - utiliza exclusivamente el área administrativa.
+ *
+ * La PLATFORM_TREASURY es independiente y se gestiona
+ * mediante endpoints administrativos específicos.
  */
 
 export async function GET() {
   try {
+    const authenticatedUser =
+      await getAuthenticatedUser();
+
+    /*
+     * ========================================================
+     * ADMIN NO POSEE DIRECCIÓN PERSONAL DE DEPÓSITO
+     * ========================================================
+     */
+
+    if (
+      authenticatedUser.role ===
+      "ADMIN"
+    ) {
+      throw new AppError(
+        "Las cuentas administradoras no poseen una dirección personal de depósito.",
+        "WALLET_NOT_ALLOWED_FOR_ADMIN",
+        403,
+      );
+    }
+
     const userId =
-      await getAuthenticatedUserId();
+      authenticatedUser.id;
 
     const tronService =
       new TronService();

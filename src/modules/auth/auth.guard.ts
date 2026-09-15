@@ -24,6 +24,12 @@ import {
   UserService,
 } from "@/modules/users/user.service";
 
+/*
+ * ============================================================
+ * BEARER TOKEN
+ * ============================================================
+ */
+
 async function getBearerToken():
   Promise<string | null> {
   const headersList =
@@ -47,6 +53,19 @@ async function getBearerToken():
     .slice(7)
     .trim();
 }
+
+/*
+ * ============================================================
+ * USUARIO ACTUAL
+ * ============================================================
+ *
+ * Devuelve cualquier usuario autenticado y ACTIVE:
+ *
+ * - USER
+ * - ADMIN
+ *
+ * No realiza autorización por rol.
+ */
 
 export async function getCurrentUser():
   Promise<PublicUser | null> {
@@ -97,6 +116,20 @@ export async function getCurrentUser():
   }
 }
 
+/*
+ * ============================================================
+ * USUARIO AUTENTICADO
+ * ============================================================
+ *
+ * Acepta:
+ *
+ * - USER
+ * - ADMIN
+ *
+ * Utilizar cuando solamente importa que exista
+ * una sesión válida y activa.
+ */
+
 export async function requireUser():
   Promise<PublicUser> {
   const user =
@@ -112,6 +145,49 @@ export async function requireUser():
 
   return user;
 }
+
+/*
+ * ============================================================
+ * USUARIO DE WALLET PERSONAL
+ * ============================================================
+ *
+ * Exclusivo para rol USER.
+ *
+ * Las cuentas ADMIN:
+ *
+ * - no poseen wallet personal;
+ * - no poseen dirección personal de depósito;
+ * - no envían fondos desde una wallet personal;
+ * - no participan del flujo no-custodial.
+ *
+ * La PLATFORM_TREASURY es independiente y se administra
+ * mediante rutas específicas para ADMIN.
+ */
+
+export async function requireWalletUser():
+  Promise<PublicUser> {
+  const user =
+    await requireUser();
+
+  if (
+    user.role !==
+    "USER"
+  ) {
+    throw new AppError(
+      "Las cuentas administradoras no pueden utilizar una wallet personal.",
+      "WALLET_NOT_ALLOWED_FOR_ADMIN",
+      403,
+    );
+  }
+
+  return user;
+}
+
+/*
+ * ============================================================
+ * ADMINISTRADOR
+ * ============================================================
+ */
 
 export async function requireAdmin():
   Promise<PublicUser> {

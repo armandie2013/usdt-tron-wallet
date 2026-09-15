@@ -8,7 +8,7 @@ import {
 } from "@/lib/errors/app-error";
 
 import {
-  requireUser,
+  requireWalletUser,
 } from "@/modules/auth/auth.guard";
 
 import {
@@ -26,12 +26,24 @@ const transactionService =
  * GET /api/v1/transactions
  * ============================================================
  *
- * Devuelve el historial USDT TRC20 real del usuario.
+ * Devuelve el historial USDT TRC20 real de la wallet personal
+ * del usuario.
  *
  * Fuente de verdad:
  * TRON / TronGrid.
  *
  * No utiliza ledger interno para construir el historial.
+ *
+ * Solamente USER puede consultar este historial.
+ *
+ * ADMIN:
+ *
+ * - no posee wallet personal;
+ * - no posee historial personal de transferencias;
+ * - no participa del flujo no-custodial.
+ *
+ * La PLATFORM_TREASURY se consulta mediante endpoints
+ * administrativos separados.
  */
 
 export async function GET(
@@ -40,7 +52,7 @@ export async function GET(
 ) {
   try {
     const user =
-      await requireUser();
+      await requireWalletUser();
 
     const limitParameter =
       request.nextUrl

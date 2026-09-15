@@ -29,8 +29,17 @@ import {
  * ============================================================
  */
 
-async function getAuthenticatedUserId():
-  Promise<string> {
+interface AuthenticatedUser {
+  id:
+    string;
+
+  role:
+    "ADMIN"
+    | "USER";
+}
+
+async function getAuthenticatedUser():
+  Promise<AuthenticatedUser> {
   const cookieStore =
     await cookies();
 
@@ -65,7 +74,13 @@ async function getAuthenticatedUserId():
       );
     }
 
-    return payload.sub;
+    return {
+      id:
+        payload.sub,
+
+      role:
+        payload.role,
+    };
   } catch {
     throw new AppError(
       "La sesión no es válida o ha expirado.",
@@ -79,6 +94,26 @@ async function getAuthenticatedUserId():
  * ============================================================
  * GET /api/v1/wallet
  * ============================================================
+ *
+ * Solamente los usuarios normales poseen wallet personal.
+ *
+ * ADMIN:
+ *
+ * - no tiene wallet personal;
+ * - no tiene dirección TRON;
+ * - no recibe fondos;
+ * - no envía fondos;
+ * - no participa del flujo no-custodial.
+ *
+ * La wallet de la plataforma es independiente:
+ *
+ * PLATFORM_TREASURY
+ *
+ * y se administra exclusivamente desde los endpoints ADMIN.
+ *
+ * ============================================================
+ *
+ * USER:
  *
  * Este endpoint representa la wallet real del usuario.
  *
@@ -100,8 +135,28 @@ async function getAuthenticatedUserId():
 
 export async function GET() {
   try {
+    const authenticatedUser =
+      await getAuthenticatedUser();
+
+    /*
+     * ========================================================
+     * ADMIN NO PUEDE TENER WALLET PERSONAL
+     * ========================================================
+     */
+
+    if (
+      authenticatedUser.role ===
+      "ADMIN"
+    ) {
+      throw new AppError(
+        "Las cuentas administradoras no poseen una wallet personal.",
+        "WALLET_NOT_ALLOWED_FOR_ADMIN",
+        403,
+      );
+    }
+
     const userId =
-      await getAuthenticatedUserId();
+      authenticatedUser.id;
 
     const tronService =
       new TronService();
