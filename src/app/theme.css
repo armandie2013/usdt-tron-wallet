@@ -1,0 +1,1047 @@
+/*
+ * ============================================================
+ * MI WALLET - THEME SYSTEM
+ * ============================================================
+ *
+ * DEFAULT: LIGHT
+ *
+ * localStorage:
+ *
+ * wallet-theme = light | dark
+ *
+ * ============================================================
+ */
+
+
+/*
+ * ============================================================
+ * LIGHT
+ * ============================================================
+ */
+
+:root,
+html[data-theme="light"] {
+  color-scheme:
+    light;
+
+  /*
+   * BACKGROUNDS
+   */
+
+  --app-bg:
+    #eef4f7;
+
+  --app-bg-top:
+    #eaf5f8;
+
+  --app-bg-soft:
+    #e5eef2;
+
+  --app-surface:
+    rgba(
+      255,
+      255,
+      255,
+      0.90
+    );
+
+  --app-surface-strong:
+    rgba(
+      255,
+      255,
+      255,
+      0.98
+    );
+
+  --app-surface-solid:
+    #ffffff;
+
+  --app-surface-muted:
+    #f1f6f8;
+
+  --app-surface-raised:
+    #e4edf1;
+
+  --app-input:
+    rgba(
+      255,
+      255,
+      255,
+      0.96
+    );
+
+  /*
+   * TEXT
+   */
+
+  --app-text:
+    #172832;
+
+  --app-text-strong:
+    #10232d;
+
+  --app-text-secondary:
+    #526873;
+
+  --app-muted:
+    #70848e;
+
+  --app-faint:
+    #8a9ca4;
+
+  /*
+   * BORDER
+   */
+
+  --app-border:
+    rgba(
+      27,
+      61,
+      77,
+      0.13
+    );
+
+  --app-border-strong:
+    rgba(
+      27,
+      61,
+      77,
+      0.21
+    );
+
+  /*
+   * PRIMARY
+   */
+
+  --app-primary:
+    #13789a;
+
+  --app-primary-hover:
+    #075f7a;
+
+  --app-primary-strong:
+    #075f7a;
+
+  --app-primary-soft:
+    rgba(
+      19,
+      120,
+      154,
+      0.11
+    );
+
+  /*
+   * SUCCESS
+   */
+
+  --app-success:
+    #07835f;
+
+  --app-success-strong:
+    #056749;
+
+  --app-success-soft:
+    rgba(
+      7,
+      131,
+      95,
+      0.11
+    );
+
+  /*
+   * WARNING
+   */
+
+  --app-warning:
+    #b8740d;
+
+  --app-warning-soft:
+    rgba(
+      184,
+      116,
+      13,
+      0.11
+    );
+
+  /*
+   * DANGER
+   */
+
+  --app-danger:
+    #c93e50;
+
+  --app-danger-soft:
+    rgba(
+      201,
+      62,
+      80,
+      0.10
+    );
+
+  /*
+   * SHADOW
+   */
+
+  --app-shadow:
+    0 16px 42px
+    rgba(
+      30,
+      65,
+      82,
+      0.10
+    );
+
+  --app-shadow-soft:
+    0 7px 22px
+    rgba(
+      30,
+      65,
+      82,
+      0.07
+    );
+}
+
+
+/*
+ * ============================================================
+ * DARK
+ * ============================================================
+ */
+
+html[data-theme="dark"] {
+  color-scheme:
+    dark;
+
+  --app-bg:
+    #0e1321;
+
+  --app-bg-top:
+    #0e1321;
+
+  --app-bg-soft:
+    #111827;
+
+  --app-surface:
+    rgba(
+      14,
+      25,
+      45,
+      0.72
+    );
+
+  --app-surface-strong:
+    rgba(
+      14,
+      25,
+      45,
+      0.96
+    );
+
+  --app-surface-solid:
+    #1a1f2e;
+
+  --app-surface-muted:
+    #181f30;
+
+  --app-surface-raised:
+    #252a39;
+
+  --app-input:
+    rgba(
+      9,
+      14,
+      28,
+      0.88
+    );
+
+  --app-text:
+    #dee2f6;
+
+  --app-text-strong:
+    #f0f4ff;
+
+  --app-text-secondary:
+    #b9cacb;
+
+  --app-muted:
+    #849495;
+
+  --app-faint:
+    #657476;
+
+  --app-border:
+    rgba(
+      255,
+      255,
+      255,
+      0.08
+    );
+
+  --app-border-strong:
+    rgba(
+      255,
+      255,
+      255,
+      0.14
+    );
+
+  --app-primary:
+    #00dce6;
+
+  --app-primary-hover:
+    #00c7d1;
+
+  --app-primary-strong:
+    #00a9d9;
+
+  --app-primary-soft:
+    rgba(
+      0,
+      220,
+      230,
+      0.10
+    );
+
+  --app-success:
+    #43ffbb;
+
+  --app-success-strong:
+    #10d99a;
+
+  --app-success-soft:
+    rgba(
+      67,
+      255,
+      187,
+      0.10
+    );
+
+  --app-warning:
+    #f5b942;
+
+  --app-warning-soft:
+    rgba(
+      245,
+      185,
+      66,
+      0.10
+    );
+
+  --app-danger:
+    #f87171;
+
+  --app-danger-soft:
+    rgba(
+      248,
+      113,
+      113,
+      0.10
+    );
+
+  --app-shadow:
+    0 22px 60px
+    rgba(
+      0,
+      0,
+      0,
+      0.17
+    );
+
+  --app-shadow-soft:
+    0 8px 28px
+    rgba(
+      0,
+      0,
+      0,
+      0.15
+    );
+}
+
+
+/*
+ * ============================================================
+ * BASE
+ * ============================================================
+ */
+
+html,
+body {
+  background:
+    var(--app-bg);
+
+  color:
+    var(--app-text);
+}
+
+
+/*
+ * ============================================================
+ * THEME BUTTON
+ * ============================================================
+ */
+
+.theme-toggle {
+  color:
+    var(--app-text-secondary);
+
+  background:
+    var(--app-surface-raised);
+
+  border:
+    1px solid
+    var(--app-border);
+
+  box-shadow:
+    var(--app-shadow-soft);
+}
+
+.theme-toggle:hover {
+  color:
+    var(--app-primary);
+}
+
+
+/*
+ * ============================================================
+ * WALLET LIGHT BACKGROUND
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app {
+  color:
+    var(--app-text) !important;
+
+  background:
+    radial-gradient(
+      circle
+      at 50% -10%,
+      rgba(
+        40,
+        153,
+        183,
+        0.18
+      ),
+      transparent
+      34rem
+    ),
+    radial-gradient(
+      circle
+      at -10% 42%,
+      rgba(
+        7,
+        131,
+        95,
+        0.07
+      ),
+      transparent
+      28rem
+    ),
+    linear-gradient(
+      180deg,
+      #eaf5f8 0%,
+      #f4f8fa 38%,
+      #edf3f6 100%
+    ) !important;
+}
+
+
+/*
+ * ============================================================
+ * CARDS
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+.glass-card {
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.90
+    ) !important;
+
+  border-color:
+    var(--app-border) !important;
+
+  box-shadow:
+    0 18px 46px
+    rgba(
+      30,
+      65,
+      82,
+      0.10
+    ) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+.glass-card-nested {
+  background:
+    rgba(
+      243,
+      248,
+      250,
+      0.96
+    ) !important;
+
+  border-color:
+    var(--app-border) !important;
+}
+
+
+/*
+ * ============================================================
+ * SEND USDT ROOT
+ * ============================================================
+ *
+ * Esta regla faltaba en la versión anterior.
+ *
+ * Es la razón por la que en tu captura la parte central
+ * de Enviar USDT quedó gris/oscura en modo claro.
+ */
+
+html[data-theme="light"]
+.wallet-app
+section[class*="bg-[rgba(14,25,45,0.72)]"] {
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.92
+    ) !important;
+
+  border-color:
+    var(--app-border) !important;
+
+  box-shadow:
+    0 18px 46px
+    rgba(
+      30,
+      65,
+      82,
+      0.10
+    ) !important;
+}
+
+
+/*
+ * ============================================================
+ * SEND USDT INNER SURFACES
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+[class*="bg-[#090e1c]"] {
+  background-color:
+    #ffffff !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+[class*="bg-[#1a1f2e]"] {
+  background-color:
+    #f2f6f8 !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+[class*="bg-[#252a39]"] {
+  background-color:
+    #e5eef2 !important;
+}
+
+
+/*
+ * ============================================================
+ * TEXT
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+[class*="text-[#dee2f6]"] {
+  color:
+    var(--app-text-strong) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+[class*="text-[#b9cacb]"] {
+  color:
+    var(--app-text-secondary) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+[class*="text-[#849495]"] {
+  color:
+    var(--app-muted) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+[class*="text-[#657476]"] {
+  color:
+    var(--app-faint) !important;
+}
+
+
+/*
+ * ============================================================
+ * CYAN -> PETROLEUM IN LIGHT
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+[class*="text-cyan-300"],
+html[data-theme="light"]
+.wallet-app
+[class*="text-cyan-200"],
+html[data-theme="light"]
+.wallet-app
+[class*="text-cyan-100"],
+html[data-theme="light"]
+.wallet-app
+[class*="text-cyan-400"] {
+  color:
+    var(--app-primary) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+[class*="bg-cyan-400/10"] {
+  background-color:
+    var(--app-primary-soft) !important;
+}
+
+
+/*
+ * ============================================================
+ * GREEN
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+[class*="text-emerald-300"],
+html[data-theme="light"]
+.wallet-app
+[class*="text-emerald-200"],
+html[data-theme="light"]
+.wallet-app
+[class*="text-emerald-400"] {
+  color:
+    var(--app-success) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+[class*="bg-emerald-400/10"] {
+  background-color:
+    var(--app-success-soft) !important;
+}
+
+
+/*
+ * ============================================================
+ * HEADER
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+header {
+  background:
+    rgba(
+      249,
+      252,
+      253,
+      0.96
+    ) !important;
+
+  border-color:
+    var(--app-border) !important;
+}
+
+
+/*
+ * ============================================================
+ * INPUTS
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+input,
+html[data-theme="light"]
+.wallet-app
+textarea {
+  background:
+    #ffffff !important;
+
+  border-color:
+    var(--app-border-strong) !important;
+
+  color:
+    var(--app-text-strong) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+input::placeholder,
+html[data-theme="light"]
+.wallet-app
+textarea::placeholder {
+  color:
+    var(--app-muted) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+input:focus,
+html[data-theme="light"]
+.wallet-app
+textarea:focus {
+  border-color:
+    var(--app-primary) !important;
+
+  box-shadow:
+    0 0 0 3px
+    var(--app-primary-soft) !important;
+}
+
+
+/*
+ * ============================================================
+ * SEND STEPPER
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+div[class*="grid-cols-[auto_1fr_auto_1fr_auto]"]
+>
+div[class*="bg-white/[0.08]"] {
+  background:
+    rgba(
+      38,
+      75,
+      92,
+      0.28
+    ) !important;
+}
+
+html[data-theme="dark"]
+.wallet-app
+div[class*="grid-cols-[auto_1fr_auto_1fr_auto]"]
+>
+div[class*="bg-white/[0.08]"] {
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.12
+    ) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+div[class*="grid-cols-[auto_1fr_auto_1fr_auto]"]
+>
+div[class*="from-emerald-400/45"] {
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(
+        7,
+        131,
+        95,
+        0.65
+      ),
+      rgba(
+        19,
+        120,
+        154,
+        0.58
+      )
+    ) !important;
+}
+
+
+/*
+ * ============================================================
+ * SEND FOOTER
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+[class*="bg-[#090e1c]/45"] {
+  background:
+    #f6fafb !important;
+
+  border-color:
+    var(--app-border) !important;
+}
+
+
+/*
+ * ============================================================
+ * MODAL
+ * ============================================================
+ */
+
+html[data-theme="light"]
+[class*="bg-[rgba(14,25,45,0.96)]"] {
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.99
+    ) !important;
+
+  border-color:
+    var(--app-border) !important;
+
+  color:
+    var(--app-text) !important;
+}
+
+
+/*
+ * ============================================================
+ * BOTTOM NAV CONTAINER
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+nav {
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.96
+    ) !important;
+
+  border-color:
+    var(--app-border) !important;
+
+  box-shadow:
+    0 14px 40px
+    rgba(
+      30,
+      65,
+      82,
+      0.13
+    ) !important;
+}
+
+
+/*
+ * ============================================================
+ * BOTTOM NAV - RESET
+ * ============================================================
+ *
+ * MUY IMPORTANTE:
+ *
+ * Estos selectores tienen mayor especificidad que la
+ * conversión global de bg-cyan-400/10.
+ *
+ * Así Inicio NO queda cyan cuando Seguridad está activa.
+ */
+
+html[data-theme="light"]
+.wallet-app
+.wallet-nav-enhanced
+button[data-wallet-nav][data-active="false"],
+html[data-theme="dark"]
+.wallet-app
+.wallet-nav-enhanced
+button[data-wallet-nav][data-active="false"] {
+  background:
+    transparent !important;
+
+  color:
+    var(--app-text-secondary) !important;
+
+  border-color:
+    transparent !important;
+
+  box-shadow:
+    none !important;
+
+  outline:
+    none !important;
+}
+
+
+/*
+ * ============================================================
+ * BOTTOM NAV - ACTIVE
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+.wallet-nav-enhanced
+button[data-wallet-nav][data-active="true"] {
+  background:
+    rgba(
+      19,
+      120,
+      154,
+      0.13
+    ) !important;
+
+  color:
+    #075f7a !important;
+
+  border:
+    1px solid
+    rgba(
+      19,
+      120,
+      154,
+      0.28
+    ) !important;
+
+  box-shadow:
+    inset 0 0 0 1px
+    rgba(
+      19,
+      120,
+      154,
+      0.05
+    ) !important;
+}
+
+html[data-theme="dark"]
+.wallet-app
+.wallet-nav-enhanced
+button[data-wallet-nav][data-active="true"] {
+  background:
+    rgba(
+      0,
+      220,
+      230,
+      0.10
+    ) !important;
+
+  color:
+    #67e8f9 !important;
+
+  border:
+    1px solid
+    rgba(
+      0,
+      220,
+      230,
+      0.22
+    ) !important;
+
+  box-shadow:
+    inset 0 0 0 1px
+    rgba(
+      0,
+      220,
+      230,
+      0.04
+    ) !important;
+}
+
+
+/*
+ * ============================================================
+ * BOTTOM NAV - FOCUS
+ * ============================================================
+ */
+
+.wallet-app
+.wallet-nav-enhanced
+button[data-wallet-nav]:focus,
+.wallet-app
+.wallet-nav-enhanced
+button[data-wallet-nav]:focus-visible,
+.wallet-app
+.wallet-nav-enhanced
+button[data-wallet-nav]:active {
+  outline:
+    none !important;
+}
+
+
+/*
+ * ============================================================
+ * BOTTOM NAV HOVER
+ * ============================================================
+ */
+
+html[data-theme="light"]
+.wallet-app
+.wallet-nav-enhanced
+button[data-wallet-nav][data-active="false"]:hover {
+  background:
+    rgba(
+      19,
+      120,
+      154,
+      0.055
+    ) !important;
+
+  color:
+    var(--app-primary) !important;
+}
+
+html[data-theme="dark"]
+.wallet-app
+.wallet-nav-enhanced
+button[data-wallet-nav][data-active="false"]:hover {
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.045
+    ) !important;
+
+  color:
+    #b9cacb !important;
+}
+
+
+/*
+ * ============================================================
+ * SCROLL OFFSET
+ * ============================================================
+ */
+
+#wallet-home,
+#wallet-send,
+#wallet-security,
+#wallet-recovery {
+  scroll-margin-top:
+    92px !important;
+}
+
+
+/*
+ * ============================================================
+ * QR
+ * ============================================================
+ */
+
+.wallet-app
+img[alt="QR dirección TRON"] {
+  background:
+    #ffffff !important;
+}

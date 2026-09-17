@@ -2,20 +2,30 @@
 
 import {
   FormEvent,
+  useEffect,
   useRef,
   useState,
 } from "react";
 
 import {
+  ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  Clock3,
   KeyRound,
   Loader2,
+  RotateCcw,
   Send,
   ShieldCheck,
   TriangleAlert,
+  UserRound,
   X,
+  Zap,
 } from "lucide-react";
+
+import AppModal, {
+  type AppModalVariant,
+} from "@/components/ui/AppModal";
 
 import {
   unlockStoredWallet,
@@ -29,6 +39,17 @@ import {
   buildAndSignUsdtTransfer,
 } from "@/lib/wallet/tron-transaction.client";
 
+import {
+  formatWalletUnlockRemainingTime,
+  getWalletUnlockGuardState,
+  registerWalletUnlockFailure,
+  registerWalletUnlockSuccess,
+} from "@/lib/wallet/wallet-unlock-guard.client";
+
+import type {
+  WalletUnlockGuardState,
+} from "@/lib/wallet/wallet-unlock-guard.client";
+
 /*
  * ============================================================
  * PROPS
@@ -36,23 +57,21 @@ import {
  */
 
 interface SendUsdtPanelProps {
-  userId:
-    string;
+  userId: string;
 
-  network:
-    WalletNetwork;
+  network: WalletNetwork;
 
-  fromAddress:
-    string;
+  fromAddress: string;
 
-  contractAddress:
-    string;
+  contractAddress: string;
 
   onTransferBroadcasted?:
     (
-      txid:
-        string,
+      txid: string,
     ) => void | Promise<void>;
+
+  onRecoveryRequested?:
+    () => void;
 }
 
 /*
@@ -62,106 +81,81 @@ interface SendUsdtPanelProps {
  */
 
 interface ResolveRecipientResponse {
-  success:
-    boolean;
+  success: boolean;
 
   recipient?: {
     type:
-      "TRON_ADDRESS" |
-      "INTERNAL_USER";
+      | "TRON_ADDRESS"
+      | "INTERNAL_USER";
 
-    address:
-      string;
+    address: string;
 
-    addressBase58:
-      string;
+    addressBase58: string;
 
-    network:
-      WalletNetwork;
+    network: WalletNetwork;
 
-    internal:
-      boolean;
+    internal: boolean;
 
     user:
-      {
-        id:
-          string;
+      | {
+          id: string;
 
-        name:
-          string |
-          null;
+          name:
+            string |
+            null;
 
-        username:
-          string |
-          null;
-      } |
-      null;
+          username:
+            string |
+            null;
+        }
+      | null;
   };
 
-  code?:
-    string;
+  code?: string;
 
-  message?:
-    string;
+  message?: string;
 }
 
 interface TransferQuoteResponse {
-  success:
-    boolean;
+  success: boolean;
 
   quote?: {
-    network:
-      WalletNetwork;
+    network: WalletNetwork;
 
-    asset:
-      "USDT";
+    asset: "USDT";
 
-    tokenStandard:
-      "TRC20";
+    tokenStandard: "TRC20";
 
-    contractAddress:
-      string;
+    contractAddress: string;
 
-    fromAddress:
-      string;
+    fromAddress: string;
 
-    toAddress:
-      string;
+    toAddress: string;
 
     amount: {
-      units:
-        string;
+      units: string;
 
-      formatted:
-        string;
+      formatted: string;
 
-      decimals:
-        number;
+      decimals: number;
 
-      scale:
-        string;
+      scale: string;
     };
 
     balance: {
-      usdtUnits:
-        string;
+      usdtUnits: string;
 
-      formattedUsdt:
-        string;
+      formattedUsdt: string;
 
-      trxSun:
-        string;
+      trxSun: string;
 
-      formattedTrx:
-        string;
+      formattedTrx: string;
     };
 
     resources: {
-      energyAvailable:
-        string;
+      energyAvailable: string;
 
-      bandwidthAvailable:
-        string;
+      bandwidthAvailable: string;
 
       estimatedEnergy:
         string |
@@ -171,8 +165,7 @@ interface TransferQuoteResponse {
         string |
         null;
 
-      energyPriceSun:
-        string;
+      energyPriceSun: string;
     };
 
     networkCost: {
@@ -189,74 +182,55 @@ interface TransferQuoteResponse {
         null;
     };
 
-    feeLimitSun:
-      number;
+    feeLimitSun: number;
 
     platformFee: {
-      enabled:
-        boolean;
+      enabled: boolean;
 
-      usdtUnits:
-        string;
+      usdtUnits: string;
 
-      formattedUsdt:
-        string;
+      formattedUsdt: string;
     };
 
-    canProceed:
-      boolean;
+    canProceed: boolean;
   };
 
-  code?:
-    string;
+  code?: string;
 
-  message?:
-    string;
+  message?: string;
 }
 
 interface BroadcastResponse {
-  success:
-    boolean;
+  success: boolean;
 
   broadcast?: {
-    accepted:
-      boolean;
+    accepted: boolean;
 
-    txid:
-      string;
+    txid: string;
 
-    network:
-      WalletNetwork;
+    network: WalletNetwork;
 
-    fromAddress:
-      string;
+    fromAddress: string;
 
-    toAddress:
-      string;
+    toAddress: string;
 
-    amountUnits:
-      string;
+    amountUnits: string;
 
-    contractAddress:
-      string;
+    contractAddress: string;
 
-    feeLimitSun:
-      number;
+    feeLimitSun: number;
 
-    status:
-      "BROADCASTED";
+    status: "BROADCASTED";
   };
 
-  code?:
-    string;
+  code?: string;
 
-  message?:
-    string;
+  message?: string;
 }
 
 /*
  * ============================================================
- * ESTADO DEL FLUJO
+ * ESTADO
  * ============================================================
  */
 
@@ -267,6 +241,15 @@ type SendStep =
   | "BROADCASTING"
   | "BROADCAST_UNKNOWN"
   | "SUCCESS";
+
+interface SendModalState {
+  title: string;
+
+  message: string;
+
+  variant:
+    AppModalVariant;
+}
 
 /*
  * ============================================================
@@ -282,8 +265,7 @@ function getErrorMessage(
     string,
 ): string {
   if (
-    error instanceof
-      Error &&
+    error instanceof Error &&
     error.message
   ) {
     return error.message;
@@ -292,63 +274,351 @@ function getErrorMessage(
   return fallback;
 }
 
+function isWalletCredentialError(
+  error:
+    unknown,
+): boolean {
+  if (
+    !(error instanceof Error)
+  ) {
+    return false;
+  }
+
+  return (
+    error.message ===
+    "La contraseña de la wallet es incorrecta o los datos locales están dañados."
+  );
+}
+
 /*
- * Convierte texto decimal USDT a unidades mínimas.
+ * ============================================================
+ * IMPORTES USDT
+ * ============================================================
+ *
+ * La interfaz trabaja con 2 decimales.
+ *
+ * USDT TRC20 continúa trabajando internamente
+ * con 6 decimales.
+ *
+ * No utilizamos Number ni parseFloat para
+ * construir el importe de una transferencia.
+ * ============================================================
+ */
+
+interface ParsedUsdtInput {
+  integerPart: string;
+
+  decimalPart: string;
+}
+
+/*
+ * ============================================================
+ * PARSEAR IMPORTE VISIBLE
+ * ============================================================
+ *
+ * Formatos aceptados:
+ *
+ * 1
+ * 1,5
+ * 1,50
+ * 1000
+ * 1000,50
+ * 1.000
+ * 1.000,50
+ * 1.000.000,50
+ *
+ * También:
+ *
+ * 1000.50
+ *
+ * por compatibilidad con teclados que utilizan
+ * el punto como separador decimal.
+ * ============================================================
+ */
+
+function parseVisibleUsdtAmount(
+  input:
+    string,
+): ParsedUsdtInput {
+  const value =
+    input
+      .trim()
+      .replace(
+        /\s+/g,
+        "",
+      );
+
+  if (
+    !value
+  ) {
+    throw new Error(
+      "Ingresá un importe USDT.",
+    );
+  }
+
+  /*
+   * ==========================================================
+   * COMA COMO SEPARADOR DECIMAL
+   * ==========================================================
+   */
+
+  if (
+    value.includes(
+      ",",
+    )
+  ) {
+    const parts =
+      value.split(
+        ",",
+      );
+
+    if (
+      parts.length !==
+      2
+    ) {
+      throw new Error(
+        "Ingresá un importe USDT válido.",
+      );
+    }
+
+    const rawInteger =
+      parts[0];
+
+    const decimalPart =
+      parts[1];
+
+    /*
+     * La parte entera puede venir:
+     *
+     * 1000
+     *
+     * o
+     *
+     * 1.000
+     * 1.000.000
+     */
+
+    if (
+      !(
+        /^\d+$/.test(
+          rawInteger,
+        ) ||
+        /^\d{1,3}(?:\.\d{3})+$/.test(
+          rawInteger,
+        )
+      )
+    ) {
+      throw new Error(
+        "Ingresá un importe USDT válido.",
+      );
+    }
+
+    if (
+      !/^\d{0,2}$/.test(
+        decimalPart,
+      )
+    ) {
+      throw new Error(
+        "El importe puede tener como máximo 2 decimales.",
+      );
+    }
+
+    return {
+      integerPart:
+        rawInteger.replace(
+          /\./g,
+          "",
+        ),
+
+      decimalPart,
+    };
+  }
+
+  /*
+   * ==========================================================
+   * SIN COMA
+   * ==========================================================
+   */
+
+  const dotMatches =
+    value.match(
+      /\./g,
+    );
+
+  const dotCount =
+    dotMatches
+      ?.length ??
+    0;
+
+  /*
+   * Entero puro.
+   */
+
+  if (
+    dotCount ===
+    0
+  ) {
+    if (
+      !/^\d+$/.test(
+        value,
+      )
+    ) {
+      throw new Error(
+        "Ingresá un importe USDT válido.",
+      );
+    }
+
+    return {
+      integerPart:
+        value,
+
+      decimalPart:
+        "",
+    };
+  }
+
+  /*
+   * Un solo punto seguido de 1 o 2 números:
+   *
+   * 1.5
+   * 1.50
+   * 1000.50
+   *
+   * Lo consideramos separador decimal.
+   */
+
+  if (
+    dotCount ===
+      1 &&
+    /^\d+\.\d{1,2}$/.test(
+      value,
+    )
+  ) {
+    const [
+      integerPart,
+      decimalPart,
+    ] =
+      value.split(
+        ".",
+      );
+
+    return {
+      integerPart,
+      decimalPart,
+    };
+  }
+
+  /*
+   * Agrupación de miles:
+   *
+   * 1.000
+   * 10.000
+   * 100.000
+   * 1.000.000
+   */
+
+  if (
+    /^\d{1,3}(?:\.\d{3})+$/.test(
+      value,
+    )
+  ) {
+    return {
+      integerPart:
+        value.replace(
+          /\./g,
+          "",
+        ),
+
+      decimalPart:
+        "",
+    };
+  }
+
+  throw new Error(
+    "Ingresá un importe USDT válido con hasta 2 decimales.",
+  );
+}
+
+/*
+ * ============================================================
+ * IMPORTE VISIBLE -> UNIDADES MÍNIMAS
+ * ============================================================
+ *
+ * 1 USDT
+ * =
+ * 1.000.000 unidades mínimas
+ *
+ * Aunque el usuario solamente pueda operar
+ * con 2 decimales.
  *
  * Ejemplos:
  *
- * "1"       -> "1000000"
- * "1,5"     -> "1500000"
- * "1.5"     -> "1500000"
- * "0,000001" -> "1"
+ * 1,00
+ * ->
+ * 1000000
  *
- * No usamos float.
+ * 1,50
+ * ->
+ * 1500000
+ *
+ * 1000,25
+ * ->
+ * 1000250000
+ * ============================================================
  */
+
 function parseUsdtToUnits(
   input:
     string,
 ): string {
-  const normalized =
-    input
-      .trim()
+  const parsed =
+    parseVisibleUsdtAmount(
+      input,
+    );
+
+  const normalizedInteger =
+    parsed
+      .integerPart
       .replace(
-        ",",
-        ".",
+        /^0+(?=\d)/,
+        "",
       );
 
-  if (
-    !/^\d+(?:\.\d{0,6})?$/.test(
-      normalized,
-    )
-  ) {
-    throw new Error(
-      "Ingresá un importe USDT válido con hasta 6 decimales.",
-    );
-  }
+  /*
+   * El usuario utiliza 2 decimales.
+   *
+   * USDT utiliza 6.
+   *
+   * Ejemplo:
+   *
+   * 0,50
+   *
+   * decimal visible:
+   * 50
+   *
+   * unidades USDT:
+   * 500000
+   */
 
-  const [
-    integerPart,
-    decimalPart =
-      "",
-  ] =
-    normalized.split(
-      ".",
-    );
-
-  const decimals =
-    decimalPart
+  const visibleDecimals =
+    parsed
+      .decimalPart
       .padEnd(
-        6,
+        2,
         "0",
       );
 
+  const blockchainDecimals =
+    `${visibleDecimals}0000`;
+
   const units =
     BigInt(
-      integerPart,
+      normalizedInteger ||
+        "0",
     ) *
       1_000_000n +
     BigInt(
-      decimals ||
+      blockchainDecimals ||
         "0",
     );
 
@@ -364,23 +634,154 @@ function parseUsdtToUnits(
   return units.toString();
 }
 
-function shortenAddress(
-  address:
+/*
+ * ============================================================
+ * SEPARADOR DE MILES
+ * ============================================================
+ */
+
+function addThousandsSeparators(
+  integerPart:
+    string,
+): string {
+  return integerPart.replace(
+    /\B(?=(\d{3})+(?!\d))/g,
+    ".",
+  );
+}
+
+/*
+ * ============================================================
+ * UNIDADES USDT -> FORMATO VISIBLE
+ * ============================================================
+ *
+ * La blockchain puede contener hasta 6 decimales.
+ *
+ * Nosotros mostramos 2:
+ *
+ * 1000000
+ * ->
+ * 1,00
+ *
+ * 1000000000
+ * ->
+ * 1.000,00
+ *
+ * 1000000000000
+ * ->
+ * 1.000.000,00
+ *
+ * Si el saldo on-chain tiene más de dos decimales,
+ * se redondea únicamente para su visualización.
+ *
+ * El valor real nunca se modifica.
+ * ============================================================
+ */
+
+function formatUsdtUnitsTwoDecimals(
+  units:
+    string |
+    bigint,
+): string {
+  let value =
+    typeof units ===
+    "bigint"
+      ? units
+      : BigInt(
+          units,
+        );
+
+  const negative =
+    value <
+    0n;
+
+  if (
+    negative
+  ) {
+    value =
+      -value;
+  }
+
+  /*
+   * 1 centavo visible =
+   * 10.000 unidades mínimas.
+   *
+   * 5.000 permite redondear
+   * correctamente al centavo.
+   */
+
+  const cents =
+    (
+      value +
+      5_000n
+    ) /
+    10_000n;
+
+  const integerPart =
+    cents /
+    100n;
+
+  const decimalPart =
+    cents %
+    100n;
+
+  const formattedInteger =
+    addThousandsSeparators(
+      integerPart.toString(),
+    );
+
+  const formattedDecimals =
+    decimalPart
+      .toString()
+      .padStart(
+        2,
+        "0",
+      );
+
+  return `${
+    negative
+      ? "-"
+      : ""
+  }${formattedInteger},${formattedDecimals}`;
+}
+
+/*
+ * ============================================================
+ * FORMATEAR INPUT
+ * ============================================================
+ *
+ * Se ejecuta cuando el usuario sale del campo.
+ *
+ * Ejemplo:
+ *
+ * 1000
+ * ->
+ * 1.000,00
+ *
+ * 1000,5
+ * ->
+ * 1.000,50
+ * ============================================================
+ */
+
+function formatVisibleUsdtInput(
+  input:
     string,
 ): string {
   if (
-    address.length <
-    22
+    !input.trim()
   ) {
-    return address;
+    return "";
   }
 
-  return `${address.slice(
-    0,
-    10,
-  )}...${address.slice(
-    -10,
-  )}`;
+  const units =
+    parseUsdtToUnits(
+      input,
+    );
+
+  return formatUsdtUnitsTwoDecimals(
+    units,
+  );
 }
 
 /*
@@ -395,6 +796,7 @@ export default function SendUsdtPanel({
   fromAddress,
   contractAddress,
   onTransferBroadcasted,
+  onRecoveryRequested,
 }: SendUsdtPanelProps) {
   const [
     step,
@@ -473,9 +875,17 @@ export default function SendUsdtPanel({
       false,
     );
 
+  /*
+   * Este error se conserva exclusivamente para
+   * BROADCAST_UNKNOWN.
+   *
+   * En ese estado necesitamos mantener visible
+   * el mensaje junto al TXID.
+   */
+
   const [
-    error,
-    setError,
+    broadcastUnknownMessage,
+    setBroadcastUnknownMessage,
   ] =
     useState<
       string |
@@ -485,12 +895,37 @@ export default function SendUsdtPanel({
     );
 
   /*
-   * Guardia síncrona contra doble submit.
-   *
-   * React deshabilita el botón mediante "loading", pero useRef
-   * evita que dos eventos muy próximos entren al flujo antes
-   * de que ocurra el siguiente render.
+   * Errores / advertencias normales del flujo.
+   * Se muestran siempre en pantalla mediante AppModal.
    */
+
+  const [
+    sendModal,
+    setSendModal,
+  ] =
+    useState<SendModalState | null>(
+      null,
+    );
+
+  const [
+    unlockGuard,
+    setUnlockGuard,
+  ] =
+    useState<
+      WalletUnlockGuardState |
+      null
+    >(
+      null,
+    );
+
+  const [
+    guardClock,
+    setGuardClock,
+  ] =
+    useState(
+      Date.now(),
+    );
+
   const sendInProgressRef =
     useRef(
       false,
@@ -498,7 +933,151 @@ export default function SendUsdtPanel({
 
   /*
    * ==========================================================
-   * REINICIAR
+   * MODAL
+   * ==========================================================
+   */
+
+  function showSendModal(
+    message:
+      string,
+
+    title =
+      "No pudimos continuar",
+
+    variant:
+      AppModalVariant =
+      "error",
+  ) {
+    setSendModal({
+      title,
+      message,
+      variant,
+    });
+  }
+
+  function closeSendModal() {
+    setSendModal(
+      null,
+    );
+  }
+
+  /*
+   * ==========================================================
+   * GUARD
+   * ==========================================================
+   */
+
+  function getGuardIdentifier() {
+    return {
+      userId,
+
+      network,
+
+      addressBase58:
+        fromAddress,
+    };
+  }
+
+  useEffect(
+    () => {
+      try {
+        const state =
+          getWalletUnlockGuardState({
+            userId,
+
+            network,
+
+            addressBase58:
+              fromAddress,
+          });
+
+        setUnlockGuard(
+          state,
+        );
+      } catch (
+        guardError
+      ) {
+        console.error(
+          "[WALLET UNLOCK GUARD]",
+          guardError,
+        );
+      }
+    },
+    [
+      userId,
+      network,
+      fromAddress,
+    ],
+  );
+
+  useEffect(
+    () => {
+      if (
+        !unlockGuard?.locked
+      ) {
+        return;
+      }
+
+      const timer =
+        window.setInterval(
+          () => {
+            setGuardClock(
+              Date.now(),
+            );
+
+            try {
+              const state =
+                getWalletUnlockGuardState({
+                  userId,
+
+                  network,
+
+                  addressBase58:
+                    fromAddress,
+                });
+
+              setUnlockGuard(
+                state,
+              );
+
+              if (
+                !state.locked
+              ) {
+                setWalletPassword(
+                  "",
+                );
+              }
+            } catch (
+              guardError
+            ) {
+              console.error(
+                "[WALLET UNLOCK GUARD TIMER]",
+                guardError,
+              );
+            }
+          },
+          1000,
+        );
+
+      return () => {
+        window.clearInterval(
+          timer,
+        );
+      };
+    },
+    [
+      unlockGuard?.locked,
+      userId,
+      network,
+      fromAddress,
+    ],
+  );
+
+  void guardClock;
+
+  /*
+   * ==========================================================
+   * RESET
    * ==========================================================
    */
 
@@ -534,7 +1113,11 @@ export default function SendUsdtPanel({
       null,
     );
 
-    setError(
+    setBroadcastUnknownMessage(
+      null,
+    );
+
+    setSendModal(
       null,
     );
   }
@@ -542,6 +1125,7 @@ export default function SendUsdtPanel({
   /*
    * ==========================================================
    * PASO 1
+   *
    * RESOLVER DESTINATARIO + COTIZAR
    * ==========================================================
    */
@@ -552,7 +1136,11 @@ export default function SendUsdtPanel({
   ) {
     event.preventDefault();
 
-    setError(
+    setSendModal(
+      null,
+    );
+
+    setBroadcastUnknownMessage(
       null,
     );
 
@@ -561,11 +1149,6 @@ export default function SendUsdtPanel({
     );
 
     try {
-      /*
-       * Importe decimal visible
-       * →
-       * unidades mínimas USDT.
-       */
       const amountUnits =
         parseUsdtToUnits(
           amountInput,
@@ -573,7 +1156,7 @@ export default function SendUsdtPanel({
 
       /*
        * ======================================================
-       * RESOLVER DESTINATARIO
+       * RESOLVE RECIPIENT
        * ======================================================
        */
 
@@ -632,7 +1215,7 @@ export default function SendUsdtPanel({
 
       /*
        * ======================================================
-       * COTIZAR TRANSFERENCIA
+       * QUOTE
        * ======================================================
        */
 
@@ -679,10 +1262,9 @@ export default function SendUsdtPanel({
       }
 
       /*
-       * Validaciones adicionales del cliente.
-       *
-       * El backend también valida, pero no confiamos
-       * únicamente en una sola capa.
+       * ======================================================
+       * VALIDACIONES DE INTEGRIDAD
+       * ======================================================
        */
 
       if (
@@ -766,11 +1348,13 @@ export default function SendUsdtPanel({
         null,
       );
 
-      setError(
+      showSendModal(
         getErrorMessage(
           prepareError,
           "No se pudo preparar la transferencia.",
         ),
+        "No pudimos preparar la transferencia",
+        "error",
       );
     } finally {
       setLoading(
@@ -782,20 +1366,23 @@ export default function SendUsdtPanel({
   /*
    * ==========================================================
    * PASO 2
+   *
    * ACEPTAR COTIZACIÓN
    * ==========================================================
    */
 
   function handleAcceptQuote() {
-    setError(
+    setSendModal(
       null,
     );
 
     if (
       !quote
     ) {
-      setError(
-        "La cotización ya no está disponible.",
+      showSendModal(
+        "La cotización ya no está disponible. Volvé a preparar la transferencia.",
+        "La cotización venció",
+        "warning",
       );
 
       return;
@@ -804,8 +1391,48 @@ export default function SendUsdtPanel({
     if (
       !quote.canProceed
     ) {
-      setError(
-        "La wallet no dispone de recursos/TRX suficientes para esta transferencia.",
+      showSendModal(
+        "La wallet no dispone actualmente de recursos o TRX suficientes para cubrir esta transferencia.",
+        "Recursos insuficientes",
+        "warning",
+      );
+
+      return;
+    }
+
+    try {
+      const guardState =
+        getWalletUnlockGuardState(
+          getGuardIdentifier(),
+        );
+
+      setUnlockGuard(
+        guardState,
+      );
+
+      if (
+        guardState.locked
+      ) {
+        showSendModal(
+          "La wallet se encuentra temporalmente bloqueada por intentos fallidos de contraseña. Esperá a que finalice el bloqueo o recuperá el acceso con tus 12 palabras.",
+          "Wallet temporalmente bloqueada",
+          "warning",
+        );
+
+        return;
+      }
+    } catch (
+      guardError
+    ) {
+      console.error(
+        "[WALLET UNLOCK GUARD]",
+        guardError,
+      );
+
+      showSendModal(
+        "No se pudo comprobar el estado de seguridad local de la wallet.",
+        "No pudimos verificar la wallet",
+        "error",
       );
 
       return;
@@ -823,6 +1450,7 @@ export default function SendUsdtPanel({
   /*
    * ==========================================================
    * PASO 3
+   *
    * DESBLOQUEAR + FIRMAR + BROADCAST
    * ==========================================================
    */
@@ -833,16 +1461,13 @@ export default function SendUsdtPanel({
   ) {
     event.preventDefault();
 
-    /*
-     * Evita doble firma / doble broadcast por doble submit.
-     */
     if (
       sendInProgressRef.current
     ) {
       return;
     }
 
-    setError(
+    setSendModal(
       null,
     );
 
@@ -850,8 +1475,10 @@ export default function SendUsdtPanel({
       !quote ||
       !resolvedRecipient
     ) {
-      setError(
-        "La transferencia debe volver a prepararse.",
+      showSendModal(
+        "Los datos preparados ya no están disponibles. Volvé a ingresar el destinatario y el importe.",
+        "Prepará nuevamente la transferencia",
+        "warning",
       );
 
       setStep(
@@ -864,8 +1491,10 @@ export default function SendUsdtPanel({
     if (
       !quote.canProceed
     ) {
-      setError(
-        "La cotización ya no permite continuar con esta transferencia.",
+      showSendModal(
+        "La cotización ya no permite continuar. Verificá el saldo, TRX y recursos de la wallet.",
+        "No podemos continuar",
+        "warning",
       );
 
       setStep(
@@ -876,9 +1505,11 @@ export default function SendUsdtPanel({
     }
 
     /*
-     * Revalidamos los datos públicos inmediatamente antes
-     * de desbloquear y firmar.
+     * ========================================================
+     * VALIDACIÓN DE INTEGRIDAD ANTES DE FIRMAR
+     * ========================================================
      */
+
     if (
       quote.network !==
         network ||
@@ -889,8 +1520,10 @@ export default function SendUsdtPanel({
       quote.toAddress !==
         resolvedRecipient.addressBase58
     ) {
-      setError(
-        "Los datos de la transferencia cambiaron. Prepará nuevamente la operación.",
+      showSendModal(
+        "Los datos de la transferencia cambiaron. Por seguridad, prepará nuevamente la operación.",
+        "Los datos cambiaron",
+        "error",
       );
 
       setStep(
@@ -900,11 +1533,64 @@ export default function SendUsdtPanel({
       return;
     }
 
+    let guardState:
+      WalletUnlockGuardState;
+
+    try {
+      guardState =
+        getWalletUnlockGuardState(
+          getGuardIdentifier(),
+        );
+
+      setUnlockGuard(
+        guardState,
+      );
+    } catch (
+      guardError
+    ) {
+      console.error(
+        "[WALLET UNLOCK GUARD]",
+        guardError,
+      );
+
+      showSendModal(
+        "No se pudo verificar el estado de seguridad de la wallet.",
+        "No pudimos verificar la wallet",
+        "error",
+      );
+
+      return;
+    }
+
+    /*
+     * ========================================================
+     * BLOQUEO TEMPORAL
+     * ========================================================
+     */
+
+    if (
+      guardState.locked
+    ) {
+      setWalletPassword(
+        "",
+      );
+
+      showSendModal(
+        "La wallet continúa temporalmente bloqueada por intentos fallidos. Esperá a que finalice el tiempo de bloqueo antes de volver a intentar.",
+        "Wallet temporalmente bloqueada",
+        "warning",
+      );
+
+      return;
+    }
+
     if (
       !walletPassword
     ) {
-      setError(
-        "Ingresá la contraseña de tu wallet.",
+      showSendModal(
+        "Ingresá la contraseña local que protege esta wallet.",
+        "Ingresá tu contraseña",
+        "warning",
       );
 
       return;
@@ -920,22 +1606,109 @@ export default function SendUsdtPanel({
 
       /*
        * ======================================================
-       * DESBLOQUEAR VAULT LOCAL
+       * DESBLOQUEO LOCAL
        * ======================================================
-       *
-       * Esta operación ocurre en el navegador.
-       *
-       * La contraseña NO se envía al backend.
-       * La private key NO se envía al backend.
        */
 
-      const unlockedWallet =
-        await unlockStoredWallet({
-          userId,
-          network,
-          password:
-            walletPassword,
-        });
+      let unlockedWallet:
+        Awaited<
+          ReturnType<
+            typeof unlockStoredWallet
+          >
+        >;
+
+      try {
+        unlockedWallet =
+          await unlockStoredWallet({
+            userId,
+
+            network,
+
+            password:
+              walletPassword,
+          });
+      } catch (
+        unlockError
+      ) {
+        setWalletPassword(
+          "",
+        );
+
+        /*
+         * Solamente este error cuenta como
+         * intento fallido.
+         */
+
+        if (
+          isWalletCredentialError(
+            unlockError,
+          )
+        ) {
+          const failedState =
+            registerWalletUnlockFailure(
+              getGuardIdentifier(),
+            );
+
+          setUnlockGuard(
+            failedState,
+          );
+
+          /*
+           * Tercer intento:
+           * entra en bloqueo temporal.
+           */
+
+          if (
+            failedState.locked
+          ) {
+            showSendModal(
+              "Se alcanzó el máximo de intentos permitidos. La wallet fue bloqueada temporalmente en este dispositivo. Tus fondos y la wallet no fueron modificados.",
+              "Wallet temporalmente bloqueada",
+              "warning",
+            );
+          } else {
+            const remaining =
+              failedState.attemptsRemaining;
+
+            showSendModal(
+              remaining ===
+                1
+                ? "La contraseña de la wallet es incorrecta. Te queda 1 intento antes del bloqueo temporal."
+                : `La contraseña de la wallet es incorrecta. Te quedan ${remaining} intentos antes del bloqueo temporal.`,
+              "Contraseña incorrecta",
+              "error",
+            );
+          }
+
+          return;
+        }
+
+        /*
+         * Otros errores no consumen intentos.
+         */
+
+        throw unlockError;
+      }
+
+      /*
+       * ======================================================
+       * CONTRASEÑA CORRECTA
+       * ======================================================
+       */
+
+      const successState =
+        registerWalletUnlockSuccess(
+          getGuardIdentifier(),
+        );
+
+      setUnlockGuard(
+        successState,
+      );
+
+      /*
+       * Confirmamos que la wallet desbloqueada
+       * sea exactamente la emisora registrada.
+       */
 
       if (
         unlockedWallet
@@ -947,23 +1720,19 @@ export default function SendUsdtPanel({
         );
       }
 
-      /*
-       * Quitamos la contraseña del estado React
-       * inmediatamente después de desbloquear.
-       */
       setWalletPassword(
         "",
       );
 
-      /*
-       * ======================================================
-       * FIRMA LOCAL
-       * ======================================================
-       */
-
       setStep(
         "BROADCASTING",
       );
+
+      /*
+       * ======================================================
+       * CONSTRUIR Y FIRMAR LOCALMENTE
+       * ======================================================
+       */
 
       const signed =
         await buildAndSignUsdtTransfer({
@@ -993,10 +1762,9 @@ export default function SendUsdtPanel({
         });
 
       /*
-       * A partir de acá existe una transacción firmada con TXID.
-       *
-       * Si perdemos la respuesta HTTP después de este punto,
-       * NO debemos asumir que la red no la recibió.
+       * ======================================================
+       * BROADCAST
+       * ======================================================
        */
 
       let broadcastResponse:
@@ -1031,11 +1799,19 @@ export default function SendUsdtPanel({
           broadcastNetworkError,
         );
 
+        /*
+         * A partir de este punto NO debemos asumir
+         * que la operación falló.
+         *
+         * El servidor pudo haber recibido y enviado
+         * la transacción antes de cortarse la conexión.
+         */
+
         setTxid(
           signed.txid,
         );
 
-        setError(
+        setBroadcastUnknownMessage(
           "No pudimos confirmar la respuesta del broadcast. La transacción podría haber sido recibida por TRON. Verificá el TXID antes de intentar otro envío.",
         );
 
@@ -1045,6 +1821,12 @@ export default function SendUsdtPanel({
 
         return;
       }
+
+      /*
+       * ======================================================
+       * PARSE RESPONSE
+       * ======================================================
+       */
 
       let broadcastData:
         BroadcastResponse;
@@ -1068,8 +1850,8 @@ export default function SendUsdtPanel({
           signed.txid,
         );
 
-        setError(
-          "El servidor respondió al broadcast pero la respuesta no pudo interpretarse. Verificá el TXID antes de intentar otro envío.",
+        setBroadcastUnknownMessage(
+          "El servidor respondió al broadcast pero no pudimos interpretar la respuesta. Verificá el TXID antes de intentar otro envío.",
         );
 
         setStep(
@@ -1079,23 +1861,25 @@ export default function SendUsdtPanel({
         return;
       }
 
+      /*
+       * ======================================================
+       * RESPUESTA NEGATIVA
+       * ======================================================
+       */
+
       if (
         !broadcastResponse.ok ||
         broadcastData.success !==
           true ||
         !broadcastData.broadcast
       ) {
-        /*
-         * Un rechazo explícito de TRON o un error 4xx ocurre
-         * sin un broadcast aceptado.
-         *
-         * Para errores inesperados 5xx somos conservadores:
-         * la solicitud pudo haber llegado a la red antes de
-         * perderse la respuesta.
-         */
         const explicitRejection =
           broadcastData.code ===
             "TRON_BROADCAST_REJECTED";
+
+        /*
+         * Un 5xx sin rechazo explícito es ambiguo.
+         */
 
         if (
           broadcastResponse.status >=
@@ -1106,7 +1890,7 @@ export default function SendUsdtPanel({
             signed.txid,
           );
 
-          setError(
+          setBroadcastUnknownMessage(
             broadcastData.message ??
               "No pudimos confirmar si TRON aceptó la transacción. Verificá el TXID antes de intentar otro envío.",
           );
@@ -1118,23 +1902,25 @@ export default function SendUsdtPanel({
           return;
         }
 
+        /*
+         * Rechazo explícito.
+         */
+
         throw new Error(
           broadcastData.message ??
             "TRON rechazó la transferencia.",
         );
       }
 
+      /*
+       * ======================================================
+       * VALIDAR RESPUESTA DEL BROADCAST
+       * ======================================================
+       */
+
       const broadcast =
         broadcastData.broadcast;
 
-      /*
-       * Verificamos que la respuesta corresponda exactamente
-       * a la transacción que acabamos de firmar.
-       *
-       * Si alguno de estos datos no coincide, no habilitamos
-       * un nuevo envío automáticamente porque el broadcast
-       * ya pudo haber sido aceptado.
-       */
       const responseMatchesSignedTransfer =
         broadcast.accepted ===
           true &&
@@ -1162,7 +1948,7 @@ export default function SendUsdtPanel({
           signed.txid,
         );
 
-        setError(
+        setBroadcastUnknownMessage(
           "La respuesta del broadcast no coincide completamente con la transacción firmada. Verificá el TXID antes de realizar otro envío.",
         );
 
@@ -1173,21 +1959,24 @@ export default function SendUsdtPanel({
         return;
       }
 
+      /*
+       * ======================================================
+       * SUCCESS
+       * ======================================================
+       */
+
       setTxid(
         signed.txid,
+      );
+
+      setBroadcastUnknownMessage(
+        null,
       );
 
       setStep(
         "SUCCESS",
       );
 
-      /*
-       * Este callback es solamente una actualización auxiliar
-       * de UI/datos.
-       *
-       * Si falla, NO puede transformar un broadcast exitoso
-       * en un error de transferencia ni habilitar un reenvío.
-       */
       if (
         onTransferBroadcasted
       ) {
@@ -1212,19 +2001,17 @@ export default function SendUsdtPanel({
         sendError,
       );
 
-      /*
-       * Este catch solamente cubre errores donde todavía
-       * sabemos que no existe un broadcast aceptado/ambiguo.
-       */
       setWalletPassword(
         "",
       );
 
-      setError(
+      showSendModal(
         getErrorMessage(
           sendError,
           "No se pudo realizar la transferencia.",
         ),
+        "No pudimos enviar la transferencia",
+        "error",
       );
 
       setStep(
@@ -1240,6 +2027,51 @@ export default function SendUsdtPanel({
     }
   }
 
+  /*
+   * ==========================================================
+   * BLOQUEO
+   * ==========================================================
+   */
+
+  const walletLocked =
+    unlockGuard?.locked ===
+      true;
+
+  const remainingLockText =
+    walletLocked &&
+    unlockGuard
+      ? formatWalletUnlockRemainingTime(
+          unlockGuard.remainingLockMs,
+        )
+      : null;
+
+  /*
+   * ==========================================================
+   * STEPPER
+   * ==========================================================
+   */
+
+  const stepOneDone =
+    step !==
+      "FORM";
+
+  const stepTwoActive =
+    step ===
+      "QUOTE";
+
+  const stepTwoDone =
+    step ===
+      "PASSWORD" ||
+    step ===
+      "BROADCASTING" ||
+    step ===
+      "BROADCAST_UNKNOWN" ||
+    step ===
+      "SUCCESS";
+
+  const stepThreeActive =
+    step ===
+      "PASSWORD";
 
   /*
    * ==========================================================
@@ -1248,30 +2080,45 @@ export default function SendUsdtPanel({
    */
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="rounded-xl bg-slate-100 p-3">
-            <Send className="h-5 w-5 text-slate-700" />
+    <>
+      <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[rgba(14,25,45,0.72)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_22px_60px_rgba(0,0,0,0.16)] backdrop-blur-xl">
+        {/*
+         * ======================================================
+         * HEADER
+         * ======================================================
+         */}
+
+        <div className="flex items-start justify-between gap-4 border-b border-white/[0.06] px-5 py-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/15 bg-cyan-400/10 text-cyan-300">
+              <Send className="h-[19px] w-[19px]" />
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-[16px] font-semibold text-[#dee2f6]">
+                  Enviar USDT
+                </h2>
+
+                <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[9px] font-semibold tracking-wide text-cyan-300">
+                  TRC20
+                </span>
+              </div>
+
+              <p className="mt-1 max-w-lg text-[11px] leading-5 text-[#849495]">
+                La operación se firma en este dispositivo. Tu clave privada nunca sale del navegador.
+              </p>
+            </div>
           </div>
 
-          <div>
-            <h2 className="text-lg text-slate-900">
-              Enviar USDT
-            </h2>
-
-            <p className="mt-1 text-sm leading-6 text-slate-500">
-              La transferencia se firma en este dispositivo. Tu clave privada nunca se envía al servidor.
-            </p>
-          </div>
-        </div>
-
-        {step !==
-          "FORM" &&
-          step !==
-            "SUCCESS" &&
-          step !==
-            "BROADCAST_UNKNOWN" && (
+          {step !==
+            "FORM" &&
+            step !==
+              "SUCCESS" &&
+            step !==
+              "BROADCAST_UNKNOWN" &&
+            step !==
+              "BROADCASTING" && (
             <button
               type="button"
               onClick={
@@ -1280,174 +2127,306 @@ export default function SendUsdtPanel({
               disabled={
                 loading
               }
-              title="Cancelar"
-              className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 disabled:opacity-50"
+              title="Cancelar operación"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-[#252a39] text-[#849495] transition hover:text-white disabled:opacity-50"
             >
               <X className="h-4 w-4" />
             </button>
           )}
-      </div>
-
-      {error && (
-        <div className="mt-5 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" />
-
-          <span>
-            {error}
-          </span>
         </div>
-      )}
 
-      {/*
-       * ======================================================
-       * PASO 1 - DATOS
-       * ======================================================
-       */}
+        <div className="p-5">
+          {/*
+           * ====================================================
+           * STEPPER
+           * ====================================================
+           */}
 
-      {step ===
-        "FORM" && (
-        <form
-          onSubmit={
-            handlePrepareTransfer
-          }
-          className="mt-6 space-y-4"
-        >
-          <div>
-            <label className="mb-2 block text-sm text-slate-700">
-              Destinatario
-            </label>
+          {step !==
+            "SUCCESS" &&
+            step !==
+              "BROADCAST_UNKNOWN" &&
+            step !==
+              "BROADCASTING" && (
+            <div className="mb-6">
+              <div className="grid grid-cols-[auto_1fr_auto_1fr_auto] items-center">
+                <div
+                  className={
+                    step ===
+                      "FORM"
+                      ? "flex h-7 w-7 items-center justify-center rounded-full bg-cyan-400 text-[11px] font-bold text-[#001f22] shadow-[0_0_18px_rgba(0,220,230,0.28)]"
+                      : "flex h-7 w-7 items-center justify-center rounded-full border border-emerald-400/25 bg-emerald-400/10 text-[11px] font-bold text-emerald-300"
+                  }
+                >
+                  {stepOneDone
+                    ? "✓"
+                    : "1"}
+                </div>
 
-            <input
-              type="text"
-              value={
-                recipientInput
+                <div
+                  className={
+                    stepOneDone
+                      ? "mx-2 h-px bg-gradient-to-r from-emerald-400/45 to-cyan-400/30"
+                      : "mx-2 h-px bg-white/[0.08]"
+                  }
+                />
+
+                <div
+                  className={
+                    stepTwoActive
+                      ? "flex h-7 w-7 items-center justify-center rounded-full bg-cyan-400 text-[11px] font-bold text-[#001f22] shadow-[0_0_18px_rgba(0,220,230,0.28)]"
+                      : stepTwoDone
+                        ? "flex h-7 w-7 items-center justify-center rounded-full border border-emerald-400/25 bg-emerald-400/10 text-[11px] font-bold text-emerald-300"
+                        : "flex h-7 w-7 items-center justify-center rounded-full border border-white/[0.10] bg-[#1a1f2e] text-[11px] text-[#849495]"
+                  }
+                >
+                  {stepTwoDone
+                    ? "✓"
+                    : "2"}
+                </div>
+
+                <div
+                  className={
+                    stepTwoDone
+                      ? "mx-2 h-px bg-gradient-to-r from-emerald-400/45 to-cyan-400/30"
+                      : "mx-2 h-px bg-white/[0.08]"
+                  }
+                />
+
+                <div
+                  className={
+                    stepThreeActive
+                      ? "flex h-7 w-7 items-center justify-center rounded-full bg-cyan-400 text-[11px] font-bold text-[#001f22] shadow-[0_0_18px_rgba(0,220,230,0.28)]"
+                      : "flex h-7 w-7 items-center justify-center rounded-full border border-white/[0.10] bg-[#1a1f2e] text-[11px] text-[#849495]"
+                  }
+                >
+                  3
+                </div>
+              </div>
+
+              <div className="mt-2 grid grid-cols-3 text-center text-[9px] font-medium uppercase tracking-[0.08em] text-[#849495]">
+                <span>
+                  Datos
+                </span>
+
+                <span>
+                  Revisar
+                </span>
+
+                <span>
+                  Confirmar
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/*
+           * ====================================================
+           * FORM
+           * ====================================================
+           */}
+
+          {step ===
+            "FORM" && (
+            <form
+              onSubmit={
+                handlePrepareTransfer
               }
-              onChange={(
-                event,
-              ) =>
-                setRecipientInput(
-                  event
-                    .target
-                    .value,
-                )
-              }
-              disabled={
-                loading
-              }
-              autoComplete="off"
-              required
-              placeholder="Email, usuario o dirección TRON"
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:border-slate-500 disabled:bg-slate-50"
-            />
+              className="space-y-5"
+            >
+              <div>
+                <label className="mb-2 block text-xs font-medium text-[#dee2f6]">
+                  Destinatario
+                </label>
 
-            <p className="mt-2 text-xs leading-5 text-slate-500">
-              Podés enviar a otro usuario de la plataforma o directamente a una dirección TRON.
-            </p>
-          </div>
+                <div className="relative">
+                  <UserRound className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#849495]" />
 
-          <div>
-            <label className="mb-2 block text-sm text-slate-700">
-              Importe USDT
-            </label>
+                  <input
+                    type="text"
+                    value={
+                      recipientInput
+                    }
+                    onChange={(
+                      event,
+                    ) =>
+                      setRecipientInput(
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      loading
+                    }
+                    autoComplete="off"
+                    required
+                    placeholder="Email, usuario o dirección TRON"
+                    className="w-full rounded-xl border border-white/[0.10] bg-[#090e1c]/80 py-3 pl-10 pr-4 text-sm text-[#dee2f6] outline-none transition placeholder:text-[#657476] focus:border-cyan-400 disabled:opacity-60"
+                  />
+                </div>
 
-            <div className="relative">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={
-                  amountInput
-                }
-                onChange={(
-                  event,
-                ) =>
-                  setAmountInput(
-                    event
-                      .target
-                      .value,
-                  )
-                }
+                <p className="mt-2 text-[10px] leading-5 text-[#657476]">
+                  Podés enviar a otro usuario de la plataforma o directamente a una dirección TRON.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-medium text-[#dee2f6]">
+                  Importe
+                </label>
+
+                <div className="relative overflow-hidden rounded-xl border border-white/[0.10] bg-[#090e1c]/80 transition focus-within:border-cyan-400 focus-within:shadow-[0_0_0_3px_rgba(0,220,230,0.08)]">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={
+                      amountInput
+                    }
+                    onChange={(
+                      event,
+                    ) => {
+                      const value =
+                        event.target.value;
+
+                      /*
+                       * Sólo permitimos números,
+                       * punto y coma.
+                       *
+                       * La validación definitiva
+                       * ocurre antes de cotizar.
+                       */
+
+                      if (
+                        /^[0-9.,]*$/.test(
+                          value,
+                        )
+                      ) {
+                        setAmountInput(
+                          value,
+                        );
+                      }
+                    }}
+                    onBlur={() => {
+                      if (
+                        !amountInput.trim()
+                      ) {
+                        return;
+                      }
+
+                      try {
+                        setAmountInput(
+                          formatVisibleUsdtInput(
+                            amountInput,
+                          ),
+                        );
+                      } catch {
+                        /*
+                         * No mostramos error por blur.
+                         *
+                         * El error formal aparece al
+                         * intentar revisar la transferencia.
+                         */
+                      }
+                    }}
+                    disabled={
+                      loading
+                    }
+                    autoComplete="off"
+                    required
+                    placeholder="0,00"
+                    className="w-full border-0 bg-transparent px-4 py-3 pr-20 text-[22px] font-semibold text-[#dee2f6] outline-none placeholder:text-[#404a50] disabled:opacity-60"
+                  />
+
+                  <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-xs font-semibold text-emerald-300">
+                    USDT
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/[0.06] bg-[#1a1f2e]/75 p-3.5">
+                <div className="flex items-start gap-3">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+
+                  <p className="text-[10px] leading-5 text-[#849495]">
+                    Antes de firmar vas a poder revisar el destinatario, importe y costo estimado de red.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="submit"
                 disabled={
                   loading
                 }
-                autoComplete="off"
-                required
-                placeholder="0,00"
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 pr-16 text-slate-900 outline-none focus:border-slate-500 disabled:bg-slate-50"
-              />
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#00a9d9] to-[#00dce6] px-4 py-3 text-sm font-semibold text-[#002022] shadow-[0_8px_24px_-6px_rgba(0,220,230,0.42)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
 
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-slate-500">
-                USDT
-              </span>
-            </div>
+                    Calculando...
+                  </>
+                ) : (
+                  <>
+                    Revisar transferencia
 
-            <p className="mt-2 text-xs text-slate-500">
-              Hasta 6 decimales.
-            </p>
-          </div>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
 
-          <button
-            type="submit"
-            disabled={
-              loading
-            }
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-3 text-sm text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
+          {/*
+           * ====================================================
+           * QUOTE
+           * ====================================================
+           */}
 
-                Calculando...
-              </>
-            ) : (
-              <>
-                Continuar
+          {step ===
+            "QUOTE" &&
+            quote &&
+            resolvedRecipient && (
+            <div className="space-y-4">
+              <div className="relative overflow-hidden rounded-2xl border border-emerald-400/15 bg-gradient-to-br from-emerald-400/[0.10] to-cyan-400/[0.03] p-5">
+                <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-emerald-400/10 blur-2xl" />
 
-                <ArrowRight className="h-4 w-4" />
-              </>
-            )}
-          </button>
-        </form>
-      )}
+                <p className="relative text-[10px] uppercase tracking-[0.08em] text-[#849495]">
+                  Vas a enviar
+                </p>
 
-      {/*
-       * ======================================================
-       * PASO 2 - COTIZACIÓN
-       * ======================================================
-       */}
+                <div className="relative mt-2 flex items-baseline gap-2">
+                  <p className="text-[32px] font-bold tracking-[-0.03em] text-[#dee2f6]">
+                    {
+                      formatUsdtUnitsTwoDecimals(
+                        quote
+                          .amount
+                          .units,
+                      )
+                    }
+                  </p>
 
-      {step ===
-        "QUOTE" &&
-        quote &&
-        resolvedRecipient && (
-          <div className="mt-6 space-y-5">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">
-                Enviar
-              </p>
+                  <span className="text-sm font-semibold text-emerald-300">
+                    USDT
+                  </span>
+                </div>
+              </div>
 
-              <p className="mt-1 text-2xl text-slate-900">
-                {
-                  quote
-                    .amount
-                    .formatted
-                }{" "}
-                USDT
-              </p>
-            </div>
+              <div className="rounded-xl border border-white/[0.06] bg-[#1a1f2e]/75 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-400/10 text-cyan-300">
+                    <UserRound className="h-4 w-4" />
+                  </div>
 
-            <div className="space-y-3 rounded-xl border border-slate-200 p-4 text-sm">
-              <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
-                <span className="text-slate-500">
-                  Destinatario
-                </span>
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-[0.06em] text-[#849495]">
+                      Destinatario
+                    </p>
 
-                <div className="min-w-0 text-right">
-                  {resolvedRecipient
-                    .internal &&
-                    resolvedRecipient
-                      .user
-                      ?.name && (
-                      <p className="text-slate-900">
+                    {resolvedRecipient.internal &&
+                      resolvedRecipient
+                        .user
+                        ?.name && (
+                      <p className="mt-1 text-sm font-medium text-[#dee2f6]">
                         {
                           resolvedRecipient
                             .user
@@ -1456,374 +2435,564 @@ export default function SendUsdtPanel({
                       </p>
                     )}
 
-                  <p
-                    title={
-                      quote.toAddress
-                    }
-                    className="font-mono text-xs text-slate-600"
-                  >
-                    {shortenAddress(
-                      quote.toAddress,
+                    <p className="mt-1 break-all font-mono text-[11px] leading-5 text-[#b9cacb]">
+                      {
+                        quote
+                          .toAddress
+                      }
+                    </p>
+
+                    {resolvedRecipient.internal && (
+                      <span className="mt-2 inline-flex rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[9px] font-medium text-cyan-300">
+                        Usuario interno
+                      </span>
                     )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="rounded-xl border border-white/[0.06] bg-[#1a1f2e]/60 p-3">
+                  <p className="text-[9px] uppercase tracking-wide text-[#657476]">
+                    Red
+                  </p>
+
+                  <p className="mt-1.5 text-xs font-medium text-[#dee2f6]">
+                    {quote.network} · TRC20
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-white/[0.06] bg-[#1a1f2e]/60 p-3">
+                  <p className="text-[9px] uppercase tracking-wide text-[#657476]">
+                    Saldo
+                  </p>
+
+                  <p className="mt-1.5 text-xs font-medium text-[#dee2f6]">
+                    {
+                      formatUsdtUnitsTwoDecimals(
+                        quote
+                          .balance
+                          .usdtUnits,
+                      )
+                    }{" "}
+                    USDT
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-white/[0.06] bg-[#1a1f2e]/60 p-3">
+                  <div className="flex items-center gap-1.5">
+                    <Zap className="h-3.5 w-3.5 text-cyan-300" />
+
+                    <p className="text-[9px] uppercase tracking-wide text-[#657476]">
+                      Energy
+                    </p>
+                  </div>
+
+                  <p className="mt-1.5 text-xs font-medium text-[#dee2f6]">
+                    {
+                      quote
+                        .resources
+                        .energyAvailable
+                    }
+                  </p>
+
+                  <p className="mt-1 text-[9px] text-[#657476]">
+                    Est.:{" "}
+                    {quote
+                      .resources
+                      .estimatedEnergy ??
+                      "N/D"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-white/[0.06] bg-[#1a1f2e]/60 p-3">
+                  <p className="text-[9px] uppercase tracking-wide text-[#657476]">
+                    Costo estimado
+                  </p>
+
+                  <p className="mt-1.5 text-xs font-medium text-[#dee2f6]">
+                    {quote
+                      .networkCost
+                      .estimatedTrx !==
+                    null
+                      ? `${quote.networkCost.estimatedTrx} TRX`
+                      : "N/D"}
+                  </p>
+
+                  <p className="mt-1 text-[9px] text-[#657476]">
+                    Saldo:{" "}
+                    {
+                      quote
+                        .balance
+                        .formattedTrx
+                    }{" "}
+                    TRX
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-3">
-                <span className="text-slate-500">
-                  Red
-                </span>
+              {!quote.canProceed && (
+                <div className="flex items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-950/15 p-3.5 text-xs leading-5 text-amber-200">
+                  <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
 
-                <span className="text-slate-900">
-                  {
-                    quote.network
-                  }{" "}
-                  · TRC20
-                </span>
-              </div>
+                  <p>
+                    La wallet no dispone actualmente de TRX o recursos suficientes para cubrir el costo estimado.
+                  </p>
+                </div>
+              )}
 
-              <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-3">
-                <span className="text-slate-500">
-                  Energy estimada
-                </span>
-
-                <span className="text-slate-900">
-                  {quote
-                    .resources
-                    .estimatedEnergy ??
-                    "No disponible"}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-3">
-                <span className="text-slate-500">
-                  Energy disponible
-                </span>
-
-                <span className="text-slate-900">
-                  {
-                    quote
-                      .resources
-                      .energyAvailable
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={
+                    resetFlow
                   }
-                </span>
-              </div>
+                  disabled={
+                    loading
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-[#252a39] px-4 py-3 text-xs font-medium text-[#b9cacb] transition hover:text-white"
+                >
+                  <ArrowLeft className="h-4 w-4" />
 
-              <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-3">
-                <span className="text-slate-500">
-                  Costo de red estimado
-                </span>
+                  Modificar
+                </button>
 
-                <span className="text-slate-900">
-                  {quote
-                    .networkCost
-                    .estimatedTrx !==
-                    null
-                    ? `${quote.networkCost.estimatedTrx} TRX`
-                    : "No disponible"}
-                </span>
-              </div>
+                <button
+                  type="button"
+                  onClick={
+                    handleAcceptQuote
+                  }
+                  disabled={
+                    loading ||
+                    !quote.canProceed
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#00a9d9] to-[#00dce6] px-4 py-3 text-xs font-semibold text-[#002022] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Continuar
 
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-slate-500">
-                  Comisión plataforma
-                </span>
-
-                <span className="text-slate-900">
-                  {quote
-                    .platformFee
-                    .enabled
-                    ? `${quote.platformFee.formattedUsdt} USDT`
-                    : "Sin comisión"}
-                </span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
               </div>
             </div>
+          )}
 
-            {!quote.canProceed && (
-              <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
-                <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" />
+          {/*
+           * ====================================================
+           * PASSWORD
+           * ====================================================
+           */}
 
-                <div>
-                  La wallet no dispone actualmente de TRX/recursos suficientes para cubrir el costo estimado de esta operación.
+          {step ===
+            "PASSWORD" &&
+            quote && (
+            <div className="space-y-4">
+              {walletLocked ? (
+                <>
+                  <div className="rounded-2xl border border-amber-400/20 bg-amber-950/15 p-5">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-400/10 text-amber-300">
+                        <Clock3 className="h-5 w-5" />
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-semibold text-[#dee2f6]">
+                          Wallet temporalmente bloqueada
+                        </h3>
+
+                        <p className="mt-1.5 text-[11px] leading-5 text-[#b9cacb]">
+                          Se alcanzó el máximo de intentos de contraseña permitidos.
+                        </p>
+
+                        {remainingLockText && (
+                          <p className="mt-3 text-xs font-medium text-amber-300">
+                            Podrás volver a intentar en{" "}
+                            {remainingLockText}.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/[0.06] bg-[#1a1f2e]/65 p-3.5">
+                    <div className="flex gap-3">
+                      <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+
+                      <p className="text-[10px] leading-5 text-[#849495]">
+                        El bloqueo solamente afecta nuevos intentos de contraseña en este dispositivo. La wallet y los fondos no fueron modificados.
+                      </p>
+                    </div>
+                  </div>
+
+                  {onRecoveryRequested && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWalletPassword(
+                          "",
+                        );
+
+                        setSendModal(
+                          null,
+                        );
+
+                        onRecoveryRequested();
+                      }}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/25 bg-cyan-400/10 px-4 py-3 text-xs font-medium text-cyan-300 transition hover:bg-cyan-400/15"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+
+                      Recuperar acceso con mis 12 palabras
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep(
+                        "QUOTE",
+                      );
+
+                      setSendModal(
+                        null,
+                      );
+                    }}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-[#252a39] px-4 py-3 text-xs text-[#b9cacb]"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+
+                    Volver
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-400/10 text-cyan-300">
+                        <KeyRound className="h-5 w-5" />
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-semibold text-[#dee2f6]">
+                          Autorizar transferencia
+                        </p>
+
+                        <p className="mt-1 text-[10px] leading-5 text-[#849495]">
+                          Ingresá la contraseña que protege esta wallet. Nunca se envía al servidor.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {unlockGuard &&
+                    unlockGuard.failedAttempts >
+                      0 && (
+                    <div className="rounded-xl border border-amber-400/20 bg-amber-950/15 px-4 py-3">
+                      <p className="text-[11px] text-amber-300">
+                        {unlockGuard.attemptsRemaining ===
+                        1
+                          ? "Queda 1 intento antes del bloqueo temporal."
+                          : `Quedan ${unlockGuard.attemptsRemaining} intentos antes del bloqueo temporal.`}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-white/[0.06] bg-[#1a1f2e]/65 p-4">
+                    <p className="text-[10px] uppercase tracking-wide text-[#849495]">
+                      Estás autorizando
+                    </p>
+
+                    <p className="mt-2 text-[26px] font-bold tracking-tight text-[#dee2f6]">
+                      {
+                        formatUsdtUnitsTwoDecimals(
+                          quote
+                            .amount
+                            .units,
+                        )
+                      }{" "}
+                      <span className="text-sm text-emerald-300">
+                        USDT
+                      </span>
+                    </p>
+
+                    <p className="mt-2 break-all font-mono text-[10px] leading-5 text-[#849495]">
+                      a{" "}
+                      {
+                        quote
+                          .toAddress
+                      }
+                    </p>
+                  </div>
+
+                  <form
+                    onSubmit={
+                      handleSignAndBroadcast
+                    }
+                    className="space-y-4"
+                  >
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-[#dee2f6]">
+                        Contraseña de la wallet
+                      </label>
+
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        value={
+                          walletPassword
+                        }
+                        onChange={(
+                          event,
+                        ) =>
+                          setWalletPassword(
+                            event.target.value,
+                          )
+                        }
+                        required
+                        autoFocus
+                        disabled={
+                          loading
+                        }
+                        className="w-full rounded-xl border border-white/[0.10] bg-[#090e1c]/80 px-4 py-3 text-sm text-[#dee2f6] outline-none transition focus:border-cyan-400 disabled:opacity-60"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWalletPassword(
+                            "",
+                          );
+
+                          setStep(
+                            "QUOTE",
+                          );
+
+                          setSendModal(
+                            null,
+                          );
+                        }}
+                        disabled={
+                          loading
+                        }
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-[#252a39] px-4 py-3 text-xs font-medium text-[#b9cacb]"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+
+                        Volver
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={
+                          loading
+                        }
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#00a9d9] to-[#00dce6] px-4 py-3 text-xs font-semibold text-[#002022] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {loading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+
+                            Verificando...
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="h-4 w-4" />
+
+                            Firmar y enviar
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              )}
+            </div>
+          )}
+
+          {/*
+           * ====================================================
+           * BROADCASTING
+           * ====================================================
+           */}
+
+          {step ===
+            "BROADCASTING" && (
+            <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 shadow-[0_0_30px_rgba(0,220,230,0.10)]">
+                <Loader2 className="h-6 w-6 animate-spin text-cyan-300" />
+              </div>
+
+              <p className="mt-5 text-sm font-semibold text-[#dee2f6]">
+                Firmando y enviando
+              </p>
+
+              <p className="mt-2 max-w-xs text-[10px] leading-5 text-[#849495]">
+                No cierres esta ventana hasta que la red TRON responda.
+              </p>
+            </div>
+          )}
+
+          {/*
+           * ====================================================
+           * BROADCAST UNKNOWN
+           * ====================================================
+           */}
+
+          {step ===
+            "BROADCAST_UNKNOWN" &&
+            txid && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-amber-400/20 bg-amber-950/15 p-4">
+                <div className="flex items-start gap-3">
+                  <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+
+                  <div>
+                    <p className="text-sm font-semibold text-amber-200">
+                      Estado sin confirmar
+                    </p>
+
+                    <p className="mt-1 text-[10px] leading-5 text-amber-200/70">
+                      La transacción podría haber sido recibida por TRON. No vuelvas a enviarla hasta verificar el TXID.
+                    </p>
+                  </div>
                 </div>
               </div>
-            )}
 
-            <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-800">
-              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+              {broadcastUnknownMessage && (
+                <div className="rounded-xl border border-amber-400/15 bg-amber-950/10 p-3.5">
+                  <p className="text-[11px] leading-5 text-amber-100/80">
+                    {
+                      broadcastUnknownMessage
+                    }
+                  </p>
+                </div>
+              )}
 
-              <div>
-                Revisá cuidadosamente el importe y la dirección. Una transferencia confirmada en blockchain no puede deshacerse desde la plataforma.
+              <div className="rounded-xl border border-white/[0.06] bg-[#1a1f2e]/65 p-4">
+                <p className="text-[9px] uppercase tracking-wide text-[#657476]">
+                  TXID para verificar
+                </p>
+
+                <p className="mt-2 break-all font-mono text-[10px] leading-5 text-[#b9cacb]">
+                  {txid}
+                </p>
               </div>
-            </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={
                   resetFlow
                 }
-                disabled={
-                  loading
-                }
-                className="rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 transition hover:bg-slate-50"
+                className="w-full rounded-xl border border-white/[0.08] bg-[#252a39] px-4 py-3 text-xs text-[#b9cacb]"
               >
-                Cancelar
+                Ya verifiqué el TXID
               </button>
+            </div>
+          )}
+
+          {/*
+           * ====================================================
+           * SUCCESS
+           * ====================================================
+           */}
+
+          {step ===
+            "SUCCESS" &&
+            txid && (
+            <div className="space-y-4">
+              <div className="relative overflow-hidden rounded-2xl border border-emerald-400/20 bg-emerald-950/15 px-5 py-7 text-center">
+                <div className="absolute left-1/2 top-0 h-32 w-32 -translate-x-1/2 rounded-full bg-emerald-400/10 blur-3xl" />
+
+                <div className="relative mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400/10">
+                  <CheckCircle2 className="h-7 w-7 text-emerald-300" />
+                </div>
+
+                <h3 className="relative mt-4 text-base font-semibold text-[#dee2f6]">
+                  Transacción enviada
+                </h3>
+
+                <p className="relative mt-2 text-[10px] leading-5 text-[#849495]">
+                  TRON aceptó el broadcast. La confirmación definitiva ocurrirá on-chain.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-white/[0.06] bg-[#1a1f2e]/65 p-4">
+                <p className="text-[9px] uppercase tracking-wide text-[#657476]">
+                  TXID
+                </p>
+
+                <p className="mt-2 break-all font-mono text-[10px] leading-5 text-[#b9cacb]">
+                  {txid}
+                </p>
+              </div>
 
               <button
                 type="button"
                 onClick={
-                  handleAcceptQuote
+                  resetFlow
                 }
-                disabled={
-                  loading ||
-                  !quote.canProceed
-                }
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-3 text-sm text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#00a9d9] to-[#00dce6] px-4 py-3 text-xs font-semibold text-[#002022]"
               >
-                Confirmar datos
+                <Send className="h-4 w-4" />
 
-                <ArrowRight className="h-4 w-4" />
+                Realizar otra transferencia
               </button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-      {/*
-       * ======================================================
-       * PASO 3 - CONTRASEÑA LOCAL
-       * ======================================================
-       */}
+        {/*
+         * ======================================================
+         * FOOTER
+         * ======================================================
+         */}
 
-      {step ===
-        "PASSWORD" &&
-        quote && (
-          <div className="mt-6">
-            <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-slate-600" />
+        {step ===
+          "FORM" && (
+          <div className="border-t border-white/[0.05] bg-[#090e1c]/45 px-5 py-3">
+            <div className="flex items-center justify-center gap-2">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />
 
-              <div>
-                <p className="text-sm text-slate-900">
-                  Autorizar transferencia
-                </p>
-
-                <p className="mt-1 text-xs leading-5 text-slate-500">
-                  La contraseña desbloquea temporalmente la wallet cifrada de este dispositivo para firmar la operación.
-                </p>
-              </div>
-            </div>
-
-            <form
-              onSubmit={
-                handleSignAndBroadcast
-              }
-              className="mt-5 space-y-4"
-            >
-              <div>
-                <label className="mb-2 block text-sm text-slate-700">
-                  Contraseña de la wallet
-                </label>
-
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  value={
-                    walletPassword
-                  }
-                  onChange={(
-                    event,
-                  ) =>
-                    setWalletPassword(
-                      event
-                        .target
-                        .value,
-                    )
-                  }
-                  required
-                  autoFocus
-                  disabled={
-                    loading
-                  }
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none focus:border-slate-500"
-                />
-              </div>
-
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
-                Estás autorizando el envío de{" "}
-                <span className="font-medium">
-                  {
-                    quote
-                      .amount
-                      .formatted
-                  }{" "}
-                  USDT
-                </span>{" "}
-                a{" "}
-                <span className="break-all font-mono text-xs">
-                  {
-                    quote.toAddress
-                  }
-                </span>.
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWalletPassword(
-                      "",
-                    );
-
-                    setStep(
-                      "QUOTE",
-                    );
-
-                    setError(
-                      null,
-                    );
-                  }}
-                  disabled={
-                    loading
-                  }
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 transition hover:bg-slate-50"
-                >
-                  Volver
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={
-                    loading
-                  }
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-3 text-sm text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ShieldCheck className="h-4 w-4" />
-
-                  Firmar y enviar
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-
-      {/*
-       * ======================================================
-       * FIRMANDO / BROADCAST
-       * ======================================================
-       */}
-
-      {step ===
-        "BROADCASTING" && (
-          <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
-            <Loader2 className="h-8 w-8 animate-spin text-slate-600" />
-
-            <p className="mt-4 text-sm text-slate-900">
-              Firmando y transmitiendo la transacción...
-            </p>
-
-            <p className="mt-2 max-w-md text-xs leading-5 text-slate-500">
-              No cierres esta ventana hasta que TRON responda.
-            </p>
-          </div>
-        )}
-
-      {/*
-       * ======================================================
-       * BROADCAST INDETERMINADO
-       * ======================================================
-       *
-       * Existe una transacción firmada y un TXID, pero no
-       * pudimos confirmar de forma segura la respuesta del relay.
-       *
-       * No ofrecemos retry directo para evitar un doble envío.
-       */}
-
-      {step ===
-        "BROADCAST_UNKNOWN" &&
-        txid && (
-          <div className="mt-6">
-            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-5">
-              <TriangleAlert className="mt-0.5 h-6 w-6 shrink-0 text-amber-700" />
-
-              <div className="min-w-0">
-                <p className="text-sm text-amber-900">
-                  Estado del broadcast sin confirmar
-                </p>
-
-                <p className="mt-1 text-xs leading-5 text-amber-800">
-                  No vuelvas a firmar ni enviar esta operación hasta verificar el TXID en TRON. La transacción podría haber sido recibida aunque la respuesta del servidor se haya perdido.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">
-                TXID para verificar
-              </p>
-
-              <p className="mt-1 break-all font-mono text-xs leading-5 text-slate-900">
-                {txid}
+              <p className="text-[9px] tracking-wide text-[#657476]">
+                Firma local · Clave privada protegida en este dispositivo
               </p>
             </div>
-
-            <button
-              type="button"
-              onClick={
-                resetFlow
-              }
-              className="mt-4 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 transition hover:bg-slate-50"
-            >
-              Ya verifiqué el TXID
-            </button>
           </div>
         )}
+      </section>
 
       {/*
-       * ======================================================
-       * ÉXITO
-       * ======================================================
+       * ========================================================
+       * MODAL
+       * ========================================================
        */}
 
-      {step ===
-        "SUCCESS" &&
-        txid && (
-          <div className="mt-6">
-            <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-5">
-              <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-700" />
-
-              <div className="min-w-0">
-                <p className="text-sm text-emerald-900">
-                  Transacción enviada a TRON
-                </p>
-
-                <p className="mt-1 text-xs leading-5 text-emerald-700">
-                  La red aceptó el broadcast. La confirmación definitiva ocurrirá cuando la transacción sea incluida y confirmada on-chain.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">
-                TXID
-              </p>
-
-              <p className="mt-1 break-all font-mono text-xs leading-5 text-slate-900">
-                {txid}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={
-                resetFlow
-              }
-              className="mt-4 w-full rounded-lg bg-slate-900 px-4 py-3 text-sm text-white transition hover:bg-slate-800"
-            >
-              Realizar otra transferencia
-            </button>
-          </div>
-        )}
-    </section>
+      <AppModal
+        open={
+          sendModal !==
+          null
+        }
+        variant={
+          sendModal
+            ?.variant ??
+          "error"
+        }
+        title={
+          sendModal
+            ?.title ??
+          "No pudimos continuar"
+        }
+        message={
+          sendModal
+            ?.message ??
+          ""
+        }
+        confirmLabel="Entendido"
+        onClose={
+          closeSendModal
+        }
+      />
+    </>
   );
 }

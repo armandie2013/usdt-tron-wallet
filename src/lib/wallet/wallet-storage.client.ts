@@ -68,6 +68,7 @@ export type WalletNetwork =
  * privateKey queda opcional solamente para poder leer
  * un vault creado con la primera versión del código.
  */
+
 interface WalletSecretPayload {
   mnemonic:
     string;
@@ -277,6 +278,7 @@ function normalizePassword(
    * Los espacios pueden formar parte deliberadamente
    * de una contraseña.
    */
+
   if (
     password.length <
     8
@@ -748,9 +750,6 @@ async function deriveEncryptionKey(
         name:
           "PBKDF2",
 
-        /*
-         * Conversión explícita necesaria para TS 6.
-         */
         salt:
           toArrayBuffer(
             salt,
@@ -1040,10 +1039,6 @@ export async function saveEncryptedWallet(
     );
   }
 
-  /*
-   * Verificamos antes de guardar que la private key
-   * generada corresponda a la dirección pública.
-   */
   if (
     !privateKeyMatchesAddress(
       input.wallet
@@ -1058,13 +1053,6 @@ export async function saveEncryptedWallet(
     );
   }
 
-  /*
-   * IMPORTANTE:
-   *
-   * No almacenamos privateKey en el nuevo vault.
-   *
-   * La mnemonic es suficiente para derivarla nuevamente.
-   */
   const encrypted =
     await encryptPayload(
       {
@@ -1354,18 +1342,11 @@ export async function unlockStoredWallet(
       password,
     );
 
-  /*
-   * Restauramos la wallet desde la mnemonic.
-   */
   const restored =
     restoreNonCustodialWallet(
       payload.mnemonic,
     );
 
-  /*
-   * El path actualmente debe ser el estándar utilizado
-   * por nuestra implementación.
-   */
   if (
     restored
       .derivationPath !==
@@ -1376,12 +1357,6 @@ export async function unlockStoredWallet(
     );
   }
 
-  /*
-   * Validación principal:
-   *
-   * la seed descifrada debe producir exactamente
-   * la address pública persistida.
-   */
   if (
     restored
       .addressBase58 !==
@@ -1402,11 +1377,6 @@ export async function unlockStoredWallet(
     );
   }
 
-  /*
-   * Compatibilidad defensiva con un vault creado
-   * por la primera versión que almacenaba también
-   * privateKey.
-   */
   if (
     payload.privateKey &&
     !privateKeyMatchesAddress(
@@ -1445,6 +1415,296 @@ export async function unlockStoredWallet(
     derivationPath:
       restored
         .derivationPath,
+  };
+}
+
+/*
+ * ============================================================
+ * REEMPLAZAR WALLET DESDE RECUPERACIÓN
+ * ============================================================
+ *
+ * Se utiliza cuando ya existe un vault local pero el usuario
+ * decide recuperar el acceso mediante sus 12 palabras.
+ *
+ * El vault anterior NO se borra antes.
+ *
+ * Primero:
+ *
+ * 1. restauramos y validamos la misma wallet;
+ * 2. generamos completamente el nuevo ciphertext;
+ * 3. reemplazamos el registro utilizando IndexedDB.put().
+ *
+ * Así no existe una ventana entre delete() y save().
+ */
+
+export async function replaceEncryptedWalletFromRecovery(
+  input:
+    SaveWalletInput,
+): Promise<
+  StoredWalletMetadata
+> {
+  ensureBrowser();
+
+  const userId =
+    normalizeUserId(
+      input.userId,
+    );
+
+  const network =
+    normalizeNetwork(
+      input.network,
+    );
+
+  const password =
+    normalizePassword(
+      input.password,
+    );
+
+  const recordId =
+    getRecordId(
+      userId,
+      network,
+    );
+
+  /*
+   * ==========================================================
+   * VAULT EXISTENTE
+   * ==========================================================
+   */
+
+  const existing =
+    await getRecord(
+      recordId,
+    );
+
+  if (
+    !existing
+  ) {
+    throw new Error(
+      "No existe una wallet local para reemplazar en este dispositivo.",
+    );
+  }
+
+  /*
+   * ==========================================================
+   * MISMA WALLET
+   * ==========================================================
+   */
+
+  if (
+    input.wallet
+      .addressBase58 !==
+    existing.addressBase58
+  ) {
+    throw new Error(
+      "La frase de recuperación corresponde a otra wallet. La dirección derivada no coincide con la wallet almacenada.",
+    );
+  }
+
+  if (
+    input.wallet
+      .addressHex
+      .toUpperCase() !==
+    existing.addressHex
+      .toUpperCase()
+  ) {
+    throw new Error(
+      "La dirección hexadecimal derivada no coincide con la wallet almacenada.",
+    );
+  }
+
+  /*
+   * Validación adicional.
+   *
+   * La private key derivada de la mnemonic debe controlar
+   * exactamente la dirección que ya teníamos almacenada.
+   */
+
+  if (
+    !privateKeyMatchesAddress(
+      input.wallet
+        .privateKey,
+
+      existing
+        .addressBase58,
+    )
+  ) {
+    throw new Error(
+      "La clave privada derivada de la frase de recuperación no corresponde a esta wallet.",
+    );
+  }
+
+  /*
+   * ==========================================================
+   * NUEVO CIFRADO
+   * ==========================================================
+   *
+   * encryptPayload genera:
+   *
+   * - nuevo salt;
+   * - nuevo IV;
+   * - nueva key PBKDF2;
+   * - nuevo ciphertext AES-GCM.
+   */
+
+  const encrypted =
+    await encryptPayload(
+      {
+        mnemonic:
+          input.wallet
+            .mnemonic,
+
+        derivationPath:
+          input.wallet
+            .derivationPath,
+      },
+
+      password,
+    );
+
+  const now =
+    new Date()
+      .toISOString();
+
+  /*
+   * Conservamos createdAt del vault original.
+   *
+   * updatedAt refleja cuándo se reconstruyó el vault.
+   */
+
+  const replacement:
+    WalletStorageRecord =
+      {
+        id:
+          existing.id,
+
+        version:
+          STORAGE_VERSION,
+
+        userId:
+          existing.userId,
+
+        network:
+          existing.network,
+
+        addressBase58:
+          existing
+            .addressBase58,
+
+        addressHex:
+          existing
+            .addressHex,
+
+        publicKey:
+          input.wallet
+            .publicKey,
+
+        kdf:
+          "PBKDF2",
+
+        kdfHash:
+          "SHA-256",
+
+        kdfIterations:
+          PBKDF2_ITERATIONS,
+
+        salt:
+          encrypted.salt,
+
+        algorithm:
+          "AES-GCM",
+
+        iv:
+          encrypted.iv,
+
+        ciphertext:
+          encrypted
+            .ciphertext,
+
+        createdAt:
+          existing
+            .createdAt,
+
+        updatedAt:
+          now,
+      };
+
+  /*
+   * ==========================================================
+   * REEMPLAZO
+   * ==========================================================
+   *
+   * putRecord utiliza objectStore.put().
+   *
+   * Como el ID es el mismo:
+   *
+   * NILE:userId
+   *
+   * reemplaza atómicamente el vault anterior.
+   */
+
+  await putRecord(
+    replacement,
+  );
+
+  /*
+   * ==========================================================
+   * VERIFICACIÓN POSTERIOR
+   * ==========================================================
+   */
+
+  const stored =
+    await getRecord(
+      recordId,
+    );
+
+  if (
+    !stored
+  ) {
+    throw new Error(
+      "La wallet fue recuperada pero el nuevo vault no pudo verificarse.",
+    );
+  }
+
+  if (
+    stored.addressBase58 !==
+      existing.addressBase58 ||
+    stored.addressHex
+      .toUpperCase() !==
+      existing.addressHex
+        .toUpperCase()
+  ) {
+    throw new Error(
+      "El vault recuperado no coincide con la wallet original.",
+    );
+  }
+
+  return {
+    userId:
+      stored.userId,
+
+    network:
+      stored.network,
+
+    addressBase58:
+      stored
+        .addressBase58,
+
+    addressHex:
+      stored
+        .addressHex,
+
+    publicKey:
+      stored
+        .publicKey,
+
+    createdAt:
+      stored
+        .createdAt,
+
+    updatedAt:
+      stored
+        .updatedAt,
   };
 }
 
