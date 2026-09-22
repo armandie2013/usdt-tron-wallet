@@ -1,106 +1,272 @@
+// import {
+//   TronWeb,
+// } from "tronweb";
+
+// function getTronConfiguration() {
+//   const fullHost =
+//     process.env
+//       .TRON_FULL_HOST
+//       ?.trim();
+
+//   if (!fullHost) {
+//     throw new Error(
+//       "TRON_FULL_HOST no está configurado.",
+//     );
+//   }
+
+//   const apiKey =
+//     process.env
+//       .TRON_API_KEY
+//       ?.trim();
+
+//   return {
+//     fullHost,
+//     apiKey,
+//   };
+// }
+
+// export class TronClient {
+//   /*
+//    * Cliente compartido SOLO para operaciones
+//    * que no mutan address/privateKey.
+//    */
+//   private static instance:
+//     TronWeb | null = null;
+
+//   static getInstance():
+//     TronWeb {
+//     if (
+//       TronClient.instance
+//     ) {
+//       return TronClient.instance;
+//     }
+
+//     const {
+//       fullHost,
+//       apiKey,
+//     } =
+//       getTronConfiguration();
+
+//     TronClient.instance =
+//       new TronWeb({
+//         fullHost,
+
+//         headers:
+//           apiKey
+//             ? {
+//                 "TRON-PRO-API-KEY":
+//                   apiKey,
+//               }
+//             : undefined,
+//       });
+
+//     return TronClient.instance;
+//   }
+
+//   /*
+//    * Nueva instancia independiente.
+//    *
+//    * Usarla siempre que necesitemos setAddress()
+//    * o setPrivateKey().
+//    */
+//   static create():
+//     TronWeb {
+//     const {
+//       fullHost,
+//       apiKey,
+//     } =
+//       getTronConfiguration();
+
+//     return new TronWeb({
+//       fullHost,
+
+//       headers:
+//         apiKey
+//           ? {
+//               "TRON-PRO-API-KEY":
+//                 apiKey,
+//             }
+//           : undefined,
+//     });
+//   }
+
+//   static createForAddress(
+//     address:
+//       string,
+//   ): TronWeb {
+//     const tronWeb =
+//       TronClient.create();
+
+//     tronWeb.setAddress(
+//       address,
+//     );
+
+//     return tronWeb;
+//   }
+// }
+
 import {
   TronWeb,
 } from "tronweb";
 
-function getTronConfiguration() {
-  const fullHost =
-    process.env
-      .TRON_FULL_HOST
-      ?.trim();
+import {
+  getTronConfig,
+} from "./tron.config";
 
-  if (!fullHost) {
-    throw new Error(
-      "TRON_FULL_HOST no está configurado.",
-    );
-  }
+import type {
+  TronNetwork,
+} from "./tron.types";
 
-  const apiKey =
-    process.env
-      .TRON_API_KEY
-      ?.trim();
-
-  return {
-    fullHost,
-    apiKey,
-  };
-}
+/*
+ * ============================================================
+ * TRON CLIENT
+ * ============================================================
+ *
+ * Este módulo NO contiene:
+ *
+ * - private keys;
+ * - mnemonic;
+ * - claves de usuarios;
+ *
+ * Solamente crea clientes RPC para comunicarse con TRON.
+ *
+ * La red, endpoint y API key salen exclusivamente de
+ * tron.config.ts.
+ * ============================================================
+ */
 
 export class TronClient {
   /*
-   * Cliente compartido SOLO para operaciones
-   * que no mutan address/privateKey.
+   * Singleton utilizado por operaciones generales del backend.
+   *
+   * Como cada deployment trabaja con una única TRON_NETWORK,
+   * una sola instancia es suficiente.
    */
   private static instance:
-    TronWeb | null = null;
+    TronWeb |
+    null =
+      null;
 
-  static getInstance():
-    TronWeb {
-    if (
-      TronClient.instance
-    ) {
-      return TronClient.instance;
-    }
+  private static instanceNetwork:
+    TronNetwork |
+    null =
+      null;
 
-    const {
-      fullHost,
-      apiKey,
-    } =
-      getTronConfiguration();
+  /*
+   * ==========================================================
+   * CREAR CLIENTE
+   * ==========================================================
+   */
 
-    TronClient.instance =
-      new TronWeb({
-        fullHost,
+  static create(
+    network?:
+      TronNetwork,
+  ): TronWeb {
+    const config =
+      getTronConfig(
+        network,
+      );
 
-        headers:
-          apiKey
-            ? {
-                "TRON-PRO-API-KEY":
-                  apiKey,
-              }
-            : undefined,
-      });
+    const headers =
+      config.apiKey
+        ? {
+            "TRON-PRO-API-KEY":
+              config.apiKey,
+          }
+        : undefined;
 
-    return TronClient.instance;
+    return new TronWeb({
+      fullHost:
+        config.fullHost,
+
+      headers,
+    });
   }
 
   /*
-   * Nueva instancia independiente.
+   * ==========================================================
+   * SINGLETON
+   * ==========================================================
    *
-   * Usarla siempre que necesitemos setAddress()
-   * o setPrivateKey().
+   * El singleton queda asociado explícitamente a la red.
+   *
+   * Esto evita reutilizar accidentalmente un cliente creado
+   * para otra red durante tests o procesos largos.
+   * ==========================================================
    */
-  static create():
-    TronWeb {
-    const {
-      fullHost,
-      apiKey,
-    } =
-      getTronConfiguration();
 
-    return new TronWeb({
-      fullHost,
+  static getInstance(
+    network?:
+      TronNetwork,
+  ): TronWeb {
+    const config =
+      getTronConfig(
+        network,
+      );
 
-      headers:
-        apiKey
-          ? {
-              "TRON-PRO-API-KEY":
-                apiKey,
-            }
-          : undefined,
-    });
+    if (
+      !this.instance ||
+      this.instanceNetwork !==
+        config.network
+    ) {
+      this.instance =
+        this.create(
+          config.network,
+        );
+
+      this.instanceNetwork =
+        config.network;
+    }
+
+    return this.instance;
   }
+
+  /*
+   * ==========================================================
+   * CLIENTE ASOCIADO A UNA DIRECCIÓN
+   * ==========================================================
+   *
+   * Algunas llamadas de TronWeb necesitan una dirección
+   * por defecto aunque la operación sea solamente de lectura.
+   *
+   * No se configura ninguna private key.
+   * ==========================================================
+   */
 
   static createForAddress(
     address:
       string,
+
+    network?:
+      TronNetwork,
   ): TronWeb {
     const tronWeb =
-      TronClient.create();
+      this.create(
+        network,
+      );
 
     tronWeb.setAddress(
       address,
     );
 
     return tronWeb;
+  }
+
+  /*
+   * ==========================================================
+   * RESET
+   * ==========================================================
+   *
+   * Útil principalmente para tests.
+   * ==========================================================
+   */
+
+  static reset():
+    void {
+    this.instance =
+      null;
+
+    this.instanceNetwork =
+      null;
   }
 }

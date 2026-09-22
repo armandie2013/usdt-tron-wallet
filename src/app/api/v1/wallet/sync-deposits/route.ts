@@ -1,3 +1,120 @@
+// import {
+//   NextResponse,
+// } from "next/server";
+
+// import {
+//   AppError,
+// } from "@/lib/errors/app-error";
+
+// import {
+//   requireWalletUser,
+// } from "@/modules/auth/auth.guard";
+
+// import {
+//   DepositService,
+// } from "@/modules/deposits/deposit.service";
+
+// export const runtime =
+//   "nodejs";
+
+// const depositService =
+//   new DepositService();
+
+// /*
+//  * ============================================================
+//  * POST /api/v1/wallet/sync-deposits
+//  * ============================================================
+//  *
+//  * Compatibilidad temporal.
+//  *
+//  * Este endpoint ya NO acredita depósitos ni modifica balances.
+//  *
+//  * Únicamente consulta:
+//  *
+//  * - transferencias TRC20 confirmadas;
+//  * - saldo USDT real de la wallet;
+//  * - información on-chain.
+//  *
+//  * La fuente de verdad es TRON.
+//  *
+//  * Solamente USER puede sincronizar información
+//  * correspondiente a su wallet personal.
+//  *
+//  * ADMIN no participa del flujo no-custodial.
+//  */
+
+// export async function POST() {
+//   try {
+//     const user =
+//       await requireWalletUser();
+
+//     const result =
+//       await depositService
+//         .syncUserDeposits(
+//           user.id,
+//         );
+
+//     return NextResponse.json({
+//       success:
+//         true,
+
+//       source:
+//         "TRON",
+
+//       message:
+//         result.found > 0
+//           ? `Se encontraron ${result.found} transferencias USDT confirmadas.`
+//           : "No se encontraron transferencias USDT confirmadas.",
+
+//       result,
+//     });
+//   } catch (error) {
+//     if (
+//       error instanceof
+//       AppError
+//     ) {
+//       return NextResponse.json(
+//         {
+//           success:
+//             false,
+
+//           error:
+//             error.code,
+
+//           message:
+//             error.message,
+//         },
+//         {
+//           status:
+//             error.statusCode,
+//         },
+//       );
+//     }
+
+//     console.error(
+//       "[POST /api/v1/wallet/sync-deposits]",
+//       error,
+//     );
+
+//     return NextResponse.json(
+//       {
+//         success:
+//           false,
+
+//         error:
+//           "INTERNAL_SERVER_ERROR",
+
+//         message:
+//           "No se pudo consultar el estado on-chain de la wallet.",
+//       },
+//       {
+//         status:
+//           500,
+//       },
+//     );
+//   }
+// }
+
 import {
   NextResponse,
 } from "next/server";
@@ -19,6 +136,14 @@ export const runtime =
 
 const depositService =
   new DepositService();
+
+const PRIVATE_NO_STORE_HEADERS = {
+  "Cache-Control":
+    "private, no-store, max-age=0",
+
+  Pragma:
+    "no-cache",
+} as const;
 
 /*
  * ============================================================
@@ -54,20 +179,29 @@ export async function POST() {
           user.id,
         );
 
-    return NextResponse.json({
-      success:
-        true,
+    return NextResponse.json(
+      {
+        success:
+          true,
 
-      source:
-        "TRON",
+        source:
+          "TRON",
 
-      message:
-        result.found > 0
-          ? `Se encontraron ${result.found} transferencias USDT confirmadas.`
-          : "No se encontraron transferencias USDT confirmadas.",
+        message:
+          result.found > 0
+            ? `Se encontraron ${result.found} transferencias USDT confirmadas.`
+            : "No se encontraron transferencias USDT confirmadas.",
 
-      result,
-    });
+        result,
+      },
+      {
+        status:
+          200,
+
+        headers:
+          PRIVATE_NO_STORE_HEADERS,
+      },
+    );
   } catch (error) {
     if (
       error instanceof
@@ -87,6 +221,9 @@ export async function POST() {
         {
           status:
             error.statusCode,
+
+          headers:
+            PRIVATE_NO_STORE_HEADERS,
         },
       );
     }
@@ -110,6 +247,9 @@ export async function POST() {
       {
         status:
           500,
+
+        headers:
+          PRIVATE_NO_STORE_HEADERS,
       },
     );
   }
