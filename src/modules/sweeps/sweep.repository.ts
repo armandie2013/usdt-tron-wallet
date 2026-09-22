@@ -389,6 +389,8 @@ export class SweepRepository {
     _fromAddress:
       string,
   ): Promise<boolean> {
+    void _fromAddress;
+
     return sweepRepositoryDisabled();
   }
 
@@ -415,6 +417,8 @@ export class SweepRepository {
   ): Promise<
     SweepDocument
   > {
+    void _input;
+
     return sweepRepositoryDisabled();
   }
 
@@ -425,6 +429,9 @@ export class SweepRepository {
     _txid:
       string,
   ): Promise<void> {
+    void _sweepId;
+    void _txid;
+
     return sweepRepositoryDisabled();
   }
 
@@ -435,6 +442,9 @@ export class SweepRepository {
     _errorMessage:
       string,
   ): Promise<void> {
+    void _sweepId;
+    void _errorMessage;
+
     return sweepRepositoryDisabled();
   }
 
@@ -444,6 +454,8 @@ export class SweepRepository {
   ): Promise<
     SweepDocument[]
   > {
+    void _limit;
+
     return sweepRepositoryDisabled();
   }
 
@@ -451,6 +463,8 @@ export class SweepRepository {
     _sweepId:
       string,
   ): Promise<void> {
+    void _sweepId;
+
     return sweepRepositoryDisabled();
   }
 
@@ -461,6 +475,9 @@ export class SweepRepository {
     _errorMessage:
       string,
   ): Promise<void> {
+    void _sweepId;
+    void _errorMessage;
+
     return sweepRepositoryDisabled();
   }
 }

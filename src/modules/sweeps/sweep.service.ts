@@ -73,6 +73,9 @@ export class SweepService {
   ): Promise<
     SweepDryRunResult
   > {
+    void _page;
+    void _pageSize;
+
     throw new AppError(
       "Los sweeps de wallets de clientes están deshabilitados en el modelo no-custodial.",
       "NON_CUSTODIAL_SWEEP_DISABLED",
@@ -97,6 +100,8 @@ export class SweepService {
     _address:
       string,
   ): Promise<never> {
+    void _address;
+
     throw new AppError(
       "El servidor no puede mover fondos de una wallet no-custodial.",
       "NON_CUSTODIAL_SWEEP_DISABLED",

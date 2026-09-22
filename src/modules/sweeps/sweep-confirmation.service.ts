@@ -267,6 +267,8 @@ export class SweepConfirmationService {
     _limit =
       50,
   ): Promise<never> {
+    void _limit;
+
     throw new AppError(
       "La confirmación de sweeps heredados está retirada del modelo no-custodial.",
       "NON_CUSTODIAL_SWEEP_DISABLED",

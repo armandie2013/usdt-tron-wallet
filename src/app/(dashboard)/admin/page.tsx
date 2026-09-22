@@ -2094,6 +2094,7 @@
 
 import {
   FormEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -2598,65 +2599,70 @@ export default function AdminPage() {
    * ============================================================
    */
 
-  async function fetchPlatformWallet():
-    Promise<
-      PlatformWallet |
-      null
-    > {
-    const response =
-      await fetch(
-        "/api/v1/admin/platform-wallet",
-        {
-          cache:
-            "no-store",
-        },
-      );
+  const fetchPlatformWallet =
+    useCallback(
+      async (): Promise<
+        PlatformWallet |
+        null
+      > => {
+        const response =
+          await fetch(
+            "/api/v1/admin/platform-wallet",
+            {
+              cache:
+                "no-store",
+            },
+          );
 
-    if (
-      response.status ===
-      401
-    ) {
-      router.replace(
-        "/login",
-      );
+        if (
+          response.status ===
+          401
+        ) {
+          router.replace(
+            "/login",
+          );
 
-      return null;
-    }
+          return null;
+        }
 
-    if (
-      response.status ===
-      403
-    ) {
-      router.replace(
-        "/dashboard",
-      );
+        if (
+          response.status ===
+          403
+        ) {
+          router.replace(
+            "/dashboard",
+          );
 
-      return null;
-    }
+          return null;
+        }
 
-    const data =
-      (
-        await response.json()
-      ) as
-        PlatformWalletResponse;
+        const data =
+          (
+            await response.json()
+          ) as
+            PlatformWalletResponse;
 
-    if (
-      !response.ok ||
-      data.success !==
-        true
-    ) {
-      throw new Error(
-        data.message ??
-          "No se pudo consultar la wallet de la plataforma.",
-      );
-    }
+        if (
+          !response.ok ||
+          data.success !==
+            true
+        ) {
+          throw new Error(
+            data.message ??
+              "No se pudo consultar la wallet de la plataforma.",
+          );
+        }
 
-    return data.wallet
-      ? removePlatformWalletRecovery(
-          data.wallet,
-        )
-      : null;
-  }
+        return data.wallet
+          ? removePlatformWalletRecovery(
+              data.wallet,
+            )
+          : null;
+      },
+      [
+        router,
+      ],
+    );
 
   /*
    * ============================================================
@@ -2912,6 +2918,7 @@ export default function AdminPage() {
     },
     [
       router,
+      fetchPlatformWallet,
     ],
   );
 

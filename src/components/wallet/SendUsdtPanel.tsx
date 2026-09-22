@@ -3941,14 +3941,6 @@ export default function SendUsdtPanel({
       null,
     );
 
-  const [
-    guardClock,
-    setGuardClock,
-  ] =
-    useState(
-      Date.now(),
-    );
-
   const sendInProgressRef =
     useRef(
       false,
@@ -4159,10 +4151,18 @@ export default function SendUsdtPanel({
       let cancelled =
         false;
 
+      let videoElement:
+        HTMLVideoElement |
+        null =
+          null;
+
       async function startScanner() {
         try {
+          videoElement =
+            qrVideoRef.current;
+
           if (
-            !qrVideoRef.current
+            !videoElement
           ) {
             return;
           }
@@ -4228,7 +4228,7 @@ export default function SendUsdtPanel({
                   ?.deviceId ??
                 undefined,
 
-                qrVideoRef.current,
+                videoElement,
 
                 (
                   result,
@@ -4366,11 +4366,11 @@ export default function SendUsdtPanel({
           null;
 
         if (
-          qrVideoRef.current
+          videoElement
             ?.srcObject instanceof
           MediaStream
         ) {
-          qrVideoRef.current
+          videoElement
             .srcObject
             .getTracks()
             .forEach(
@@ -4380,6 +4380,9 @@ export default function SendUsdtPanel({
                 track.stop();
               },
             );
+
+          videoElement.srcObject =
+            null;
         }
       };
     },
@@ -4437,28 +4440,39 @@ export default function SendUsdtPanel({
 
   useEffect(
     () => {
-      try {
-        const state =
-          getWalletUnlockGuardState({
-            userId,
+      const frame =
+        window.requestAnimationFrame(
+          () => {
+            try {
+              const state =
+                getWalletUnlockGuardState({
+                  userId,
 
-            network,
+                  network,
 
-            addressBase58:
-              fromAddress,
-          });
+                  addressBase58:
+                    fromAddress,
+                });
 
-        setUnlockGuard(
-          state,
+              setUnlockGuard(
+                state,
+              );
+            } catch (
+            guardError
+            ) {
+              console.error(
+                "[WALLET UNLOCK GUARD]",
+                guardError,
+              );
+            }
+          },
         );
-      } catch (
-      guardError
-      ) {
-        console.error(
-          "[WALLET UNLOCK GUARD]",
-          guardError,
+
+      return () => {
+        window.cancelAnimationFrame(
+          frame,
         );
-      }
+      };
     },
     [
       userId,
@@ -4478,10 +4492,6 @@ export default function SendUsdtPanel({
       const timer =
         window.setInterval(
           () => {
-            setGuardClock(
-              Date.now(),
-            );
-
             try {
               const state =
                 getWalletUnlockGuardState({
@@ -4529,8 +4539,6 @@ export default function SendUsdtPanel({
       fromAddress,
     ],
   );
-
-  void guardClock;
 
   /*
    * ==========================================================
