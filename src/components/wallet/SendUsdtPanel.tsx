@@ -3051,6 +3051,10 @@ import AppModal, {
 } from "@/components/ui/AppModal";
 
 import {
+  formatTronResourceDisplay,
+} from "@/lib/money/trx";
+
+import {
   unlockStoredWallet,
 } from "@/lib/wallet/wallet-storage.client";
 
@@ -5988,11 +5992,13 @@ export default function SendUsdtPanel({
                       </p>
                     </div>
 
-                    <p className="mt-1.5 text-xs font-medium text-[#dee2f6]">
+                                        <p className="mt-1.5 text-xs font-medium text-[#dee2f6]">
                       {
-                        quote
-                          .resources
-                          .energyAvailable
+                        formatTronResourceDisplay(
+                          quote
+                            .resources
+                            .energyAvailable,
+                        )
                       }
                     </p>
 
@@ -6000,8 +6006,14 @@ export default function SendUsdtPanel({
                       Est.:{" "}
                       {quote
                         .resources
-                        .estimatedEnergy ??
-                        "N/D"}
+                        .estimatedEnergy !==
+                        null
+                        ? formatTronResourceDisplay(
+                            quote
+                              .resources
+                              .estimatedEnergy,
+                          )
+                        : "N/D"}
                     </p>
                   </div>
 

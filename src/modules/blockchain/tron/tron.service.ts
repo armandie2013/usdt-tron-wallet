@@ -842,6 +842,10 @@ import {
 } from "@/lib/money/usdt";
 
 import {
+  formatSunAsTrxDisplay,
+} from "@/lib/money/trx";
+
+import {
   TronAccountRepository,
 } from "./tron-account.repository";
 
@@ -898,26 +902,10 @@ interface TronAccountResources {
  * TRON SERVICE
  * ============================================================
  *
- * IMPORTANTE:
+ * Este servicio no genera, cifra, descifra ni almacena
+ * claves privadas o frases de recuperación.
  *
- * Este servicio NO:
- *
- * - genera private keys;
- * - genera mnemonic;
- * - cifra private keys;
- * - descifra private keys;
- * - firma transacciones;
- *
- * Las wallets de usuario ahora son NO-CUSTODIAL.
- *
- * El backend solamente:
- *
- * - registra direcciones públicas;
- * - consulta direcciones;
- * - consulta saldo USDT;
- * - consulta saldo TRX;
- * - consulta Energy/Bandwidth;
- * - expone datos públicos de blockchain.
+ * Las wallets de usuario son no-custodial.
  */
 
 export class TronService {
@@ -962,15 +950,6 @@ export class TronService {
    * ========================================================
    * REGISTRAR DIRECCIÓN PÚBLICA
    * ========================================================
-   *
-   * La wallet debe haberse generado previamente
-   * del lado del cliente.
-   *
-   * Nunca aceptamos:
-   *
-   * - privateKey
-   * - mnemonic
-   * - encryptedPrivateKey
    */
 
   async registerAddress(
@@ -1013,9 +992,6 @@ export class TronService {
       );
     }
 
-    /*
-     * Validamos Base58 usando TronWeb.
-     */
     let validAddress =
       false;
 
@@ -1042,11 +1018,6 @@ export class TronService {
       );
     }
 
-    /*
-     * Dirección hexadecimal TRON:
-     *
-     * 41 + 20 bytes de address
-     */
     if (
       !/^41[0-9A-F]{40}$/.test(
         addressHex,
@@ -1059,10 +1030,6 @@ export class TronService {
       );
     }
 
-    /*
-     * Verificamos que Base58 y HEX representen
-     * exactamente la misma dirección.
-     */
     const tronWeb =
       TronClient.create();
 
@@ -1106,9 +1073,6 @@ export class TronService {
           network,
         );
 
-    /*
-     * Registro idempotente.
-     */
     if (
       existing
     ) {
@@ -1166,17 +1130,6 @@ export class TronService {
     } catch (
       error
     ) {
-      /*
-       * Repository puede lanzar errores por:
-       *
-       * - índices UNIQUE;
-       * - usuario ya registrado;
-       * - address duplicada;
-       *
-       * Convertimos esos errores en una respuesta
-       * de aplicación más controlada.
-       */
-
       if (
         error instanceof
         AppError
@@ -1255,12 +1208,6 @@ export class TronService {
    * ========================================================
    * BALANCE USDT
    * ========================================================
-   *
-   * Fuente de verdad:
-   *
-   * contrato USDT en TRON.
-   *
-   * MongoDB NO determina este balance.
    */
 
   async getUsdtBalance(
@@ -1548,12 +1495,6 @@ export class TronService {
    * ========================================================
    * ACTIVACIÓN DE CUENTA
    * ========================================================
-   *
-   * Esto solamente indica si la address existe como
-   * Account en el estado nativo de TRON.
-   *
-   * Una address puede tener actividad TRC20 y este dato
-   * debe tratarse independientemente.
    */
 
   async isAccountActivated(
@@ -1609,56 +1550,8 @@ export class TronService {
     amountSun:
       bigint,
   ): string {
-    const scale =
-      1_000_000n;
-
-    const negative =
-      amountSun <
-      0n;
-
-    const absolute =
-      negative
-        ? -amountSun
-        : amountSun;
-
-    const integer =
-      absolute /
-      scale;
-
-    const decimals =
-      absolute %
-      scale;
-
-    const formattedInteger =
-      new Intl.NumberFormat(
-        "es-AR",
-        {
-          maximumFractionDigits:
-            0,
-        },
-      ).format(
-        integer,
-      );
-
-    const decimalText =
-      decimals
-        .toString()
-        .padStart(
-          6,
-          "0",
-        )
-        .replace(
-          /0+$/,
-          "",
-        );
-
-    const result =
-      decimalText
-        ? `${formattedInteger},${decimalText}`
-        : formattedInteger;
-
-    return negative
-      ? `-${result}`
-      : result;
+    return formatSunAsTrxDisplay(
+      amountSun,
+    );
   }
 }

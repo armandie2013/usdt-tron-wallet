@@ -2122,6 +2122,10 @@ import {
   recoveryWordMatches,
 } from "@/lib/wallet/recovery-verification.client";
 
+import {
+  formatTronResourceDisplay,
+} from "@/lib/money/trx";
+
 /*
  * ============================================================
  * USERS
@@ -3937,8 +3941,12 @@ export default function AdminPage() {
                         <p className="mt-2 text-2xl text-slate-100">
                           {platformWallet
                             .resources
-                            ?.energyAvailable ??
-                            "—"}
+                            ? formatTronResourceDisplay(
+                                platformWallet
+                                  .resources
+                                  .energyAvailable,
+                              )
+                            : "—"}
                         </p>
                       </div>
 
@@ -3954,8 +3962,12 @@ export default function AdminPage() {
                         <p className="mt-2 text-2xl text-slate-100">
                           {platformWallet
                             .resources
-                            ?.bandwidthAvailable ??
-                            "—"}
+                            ? formatTronResourceDisplay(
+                                platformWallet
+                                  .resources
+                                  .bandwidthAvailable,
+                              )
+                            : "—"}
                         </p>
                       </div>
                     </div>
