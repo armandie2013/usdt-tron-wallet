@@ -23,8 +23,9 @@ export const REFRESH_TOKEN_COOKIE =
 export const ACCESS_TOKEN_TTL_SECONDS =
   15 * 60;
 
-export const REFRESH_TOKEN_TTL_DAYS =
-  30;
+export const REFRESH_TOKEN_TTL_SECONDS =
+  env.AUTH_SESSION_TTL_MINUTES *
+  60;
 
 function getJwtSecret(): Uint8Array {
   return new TextEncoder().encode(
@@ -40,6 +41,7 @@ export async function createAccessToken(
 ): Promise<string> {
   return new SignJWT({
     role: payload.role,
+    sid: payload.sessionId,
     type: "access",
   })
     .setProtectedHeader({
@@ -66,7 +68,8 @@ export async function verifyAccessToken(
   if (
     payload.type !== "access" ||
     typeof payload.sub !== "string" ||
-    typeof payload.role !== "string"
+    typeof payload.role !== "string" ||
+    typeof payload.sid !== "string"
   ) {
     throw new Error(
       "Token de acceso inválido.",
@@ -85,6 +88,7 @@ export async function verifyAccessToken(
   return {
     sub: payload.sub,
     role: payload.role,
+    sessionId: payload.sid,
     type: "access",
   };
 }
@@ -104,14 +108,14 @@ export function hashRefreshToken(
     .digest("hex");
 }
 
-export function getRefreshExpiration():
+export function getSessionExpiration():
   Date {
   const expiresAt =
     new Date();
 
-  expiresAt.setDate(
-    expiresAt.getDate() +
-      REFRESH_TOKEN_TTL_DAYS,
+  expiresAt.setSeconds(
+    expiresAt.getSeconds() +
+      REFRESH_TOKEN_TTL_SECONDS,
   );
 
   return expiresAt;

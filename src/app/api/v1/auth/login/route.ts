@@ -9,13 +9,14 @@ import {
 
 import {
   AuthService,
+  SessionAlreadyActiveError,
 } from "@/modules/auth/auth.service";
 
 import {
   ACCESS_TOKEN_COOKIE,
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_COOKIE,
-  REFRESH_TOKEN_TTL_DAYS,
+  REFRESH_TOKEN_TTL_SECONDS,
 } from "@/modules/auth/auth.tokens";
 
 import {
@@ -60,6 +61,14 @@ export async function POST(
     const result =
       await authService.login(
         validation.data,
+
+        validation.data.client ===
+        "web"
+          ? request.cookies.get(
+              REFRESH_TOKEN_COOKIE,
+            )?.value
+          : validation.data
+              .refreshToken,
       );
 
     if (
@@ -115,15 +124,30 @@ export async function POST(
         sameSite: "lax",
         path: "/",
         maxAge:
-          REFRESH_TOKEN_TTL_DAYS *
-          24 *
-          60 *
-          60,
+          REFRESH_TOKEN_TTL_SECONDS,
       },
     );
 
     return response;
   } catch (error) {
+    if (
+      error instanceof
+      SessionAlreadyActiveError
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: error.code,
+          message:
+            error.message,
+        },
+        {
+          status:
+            error.statusCode,
+        },
+      );
+    }
+
     if (
       error instanceof
       AppError

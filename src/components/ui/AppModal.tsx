@@ -37,12 +37,6 @@ interface AppModalProps {
     boolean;
 }
 
-/*
- * ============================================================
- * ESTILOS POR VARIANTE
- * ============================================================
- */
-
 function getVariantStyles(
   variant:
     AppModalVariant,
@@ -125,12 +119,6 @@ function getVariantStyles(
   }
 }
 
-/*
- * ============================================================
- * COMPONENTE
- * ============================================================
- */
-
 export default function AppModal({
   open,
   title,
@@ -181,40 +169,28 @@ export default function AppModal({
         }
       }}
     >
-      <section className="relative w-full max-w-[390px] overflow-hidden rounded-[26px] border border-white/[0.08] bg-[rgba(14,25,45,0.96)] shadow-[0_30px_90px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
-        {/*
-         * ======================================================
-         * GLOW
-         * ======================================================
-         */}
-
+      <section
+        data-app-modal="true"
+        data-variant={
+          variant
+        }
+        className="relative w-full max-w-[390px] overflow-hidden rounded-[26px] border border-[var(--app-border)] bg-[var(--app-surface-strong)] text-[var(--app-text)] shadow-[0_30px_90px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
+      >
         <div
           className={`pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full blur-3xl ${styles.glow}`}
         />
 
         <div className="relative p-5 sm:p-6">
-          {/*
-           * ====================================================
-           * CERRAR
-           * ====================================================
-           */}
-
           <button
             type="button"
             onClick={
               onClose
             }
             aria-label="Cerrar"
-            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.07] bg-white/[0.04] text-[#849495] transition hover:bg-white/[0.08] hover:text-white"
+            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-muted)] text-[var(--app-muted)] transition hover:bg-[var(--app-surface-raised)] hover:text-[var(--app-text-strong)]"
           >
             <X className="h-4 w-4" />
           </button>
-
-          {/*
-           * ====================================================
-           * ICONO
-           * ====================================================
-           */}
 
           <div
             className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${styles.iconWrapper}`}
@@ -224,33 +200,21 @@ export default function AppModal({
             />
           </div>
 
-          {/*
-           * ====================================================
-           * TEXTO
-           * ====================================================
-           */}
-
           <div className="mt-5 pr-4">
             <h2
               id="app-modal-title"
-              className="text-[18px] font-semibold leading-6 text-[#dee2f6]"
+              className="text-[18px] font-semibold leading-6 text-[var(--app-text-strong)]"
             >
               {title}
             </h2>
 
             <p
               id="app-modal-message"
-              className="mt-2 whitespace-pre-line text-[13px] leading-6 text-[#b9cacb]"
+              className="mt-2 whitespace-pre-line text-[13px] leading-6 text-[var(--app-text-secondary)]"
             >
               {message}
             </p>
           </div>
-
-          {/*
-           * ====================================================
-           * BOTÓN
-           * ====================================================
-           */}
 
           <button
             type="button"

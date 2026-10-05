@@ -21,13 +21,15 @@ import {
 } from "./auth.repository";
 
 import {
+  ACCESS_TOKEN_TTL_SECONDS,
   createAccessToken,
   createRefreshToken,
-  getRefreshExpiration,
+  getSessionExpiration,
   hashRefreshToken,
 } from "./auth.tokens";
 
 import type {
+  AuthClient,
   AuthTokens,
   LoginInput,
   LoginResult,
@@ -35,8 +37,23 @@ import type {
   RegisterResult,
 } from "./auth.types";
 
+import type {
+  UserRole,
+} from "@/modules/users/user.types";
+
 const PASSWORD_SALT_ROUNDS =
   12;
+
+export class SessionAlreadyActiveError
+  extends AppError {
+  constructor() {
+    super(
+      "Esta cuenta ya tiene una sesión activa en otro dispositivo.",
+      "SESSION_ALREADY_ACTIVE",
+      409,
+    );
+  }
+}
 
 export class AuthService {
   private readonly repository =
@@ -83,10 +100,8 @@ export class AuthService {
             name,
             email,
             passwordHash,
-
             role: "USER",
             status: "ACTIVE",
-
             emailVerified:
               false,
           });
@@ -115,6 +130,7 @@ export class AuthService {
 
   async login(
     input: LoginInput,
+    currentRefreshToken?: string,
   ): Promise<LoginResult> {
     const email =
       input.email
@@ -179,10 +195,15 @@ export class AuthService {
       );
     }
 
+    const userId =
+      user._id.toString();
+
     const tokens =
-      await this.createTokens(
-        user._id.toString(),
+      await this.createLoginTokens(
+        userId,
         user.role,
+        input.client,
+        currentRefreshToken,
       );
 
     return {
@@ -190,7 +211,6 @@ export class AuthService {
         UserService.toPublicUser(
           user,
         ),
-
       ...tokens,
     };
   }
@@ -198,14 +218,24 @@ export class AuthService {
   async refresh(
     refreshToken: string,
   ): Promise<AuthTokens> {
-    const tokenHash =
+    const currentTokenHash =
       hashRefreshToken(
         refreshToken,
       );
 
+    const nextRefreshToken =
+      createRefreshToken();
+
+    const nextTokenHash =
+      hashRefreshToken(
+        nextRefreshToken,
+      );
+
     const session =
-      await this.sessions.consume(
-        tokenHash,
+      await this.sessions.rotate(
+        currentTokenHash,
+        nextTokenHash,
+        getSessionExpiration(),
       );
 
     if (!session) {
@@ -223,6 +253,10 @@ export class AuthService {
         );
 
     if (!user || !user._id) {
+      await this.sessions.revoke(
+        nextTokenHash,
+      );
+
       throw new AppError(
         "El usuario asociado a la sesión no existe.",
         "USER_NOT_FOUND",
@@ -234,6 +268,10 @@ export class AuthService {
       user.status !==
       "ACTIVE"
     ) {
+      await this.sessions.revoke(
+        nextTokenHash,
+      );
+
       throw new AppError(
         "La cuenta no se encuentra activa.",
         "USER_NOT_ACTIVE",
@@ -241,10 +279,23 @@ export class AuthService {
       );
     }
 
-    return this.createTokens(
-      user._id.toString(),
-      user.role,
-    );
+    const accessToken =
+      await createAccessToken({
+        sub:
+          user._id.toString(),
+        role:
+          user.role,
+        sessionId:
+          session._id.toString(),
+      });
+
+    return {
+      accessToken,
+      refreshToken:
+        nextRefreshToken,
+      accessTokenExpiresIn:
+        ACCESS_TOKEN_TTL_SECONDS,
+    };
   }
 
   async logout(
@@ -261,34 +312,121 @@ export class AuthService {
     );
   }
 
-  private async createTokens(
+  private async createLoginTokens(
     userId: string,
-    role: "ADMIN" | "USER",
+    role: UserRole,
+    client: AuthClient,
+    currentRefreshToken?: string,
+  ): Promise<AuthTokens> {
+    const activeSession =
+      await this.sessions
+        .findActiveForUser(
+          userId,
+        );
+
+    if (activeSession) {
+      const currentTokenHash =
+        currentRefreshToken
+          ? hashRefreshToken(
+              currentRefreshToken,
+            )
+          : null;
+
+      if (
+        !currentTokenHash ||
+        currentTokenHash !==
+          activeSession
+            .refreshTokenHash
+      ) {
+        throw new SessionAlreadyActiveError();
+      }
+
+      const nextRefreshToken =
+        createRefreshToken();
+
+      const rotatedSession =
+        await this.sessions.rotate(
+          currentTokenHash,
+          hashRefreshToken(
+            nextRefreshToken,
+          ),
+          getSessionExpiration(),
+        );
+
+      if (rotatedSession) {
+        return this.buildTokens(
+          userId,
+          role,
+          rotatedSession
+            ._id
+            .toString(),
+          nextRefreshToken,
+        );
+      }
+    }
+
+    await this.sessions
+      .expireInactiveForUser(
+        userId,
+      );
+
+    const refreshToken =
+      createRefreshToken();
+
+    const session =
+      await this.sessions.create(
+        userId,
+        hashRefreshToken(
+          refreshToken,
+        ),
+        getSessionExpiration(),
+        client,
+      );
+
+    if (!session) {
+      const competingSession =
+        await this.sessions
+          .findActiveForUser(
+            userId,
+          );
+
+      if (competingSession) {
+        throw new SessionAlreadyActiveError();
+      }
+
+      throw new AppError(
+        "No se pudo crear la sesión.",
+        "SESSION_CREATION_FAILED",
+        500,
+      );
+    }
+
+    return this.buildTokens(
+      userId,
+      role,
+      session._id.toString(),
+      refreshToken,
+    );
+  }
+
+  private async buildTokens(
+    userId: string,
+    role: UserRole,
+    sessionId: string,
+    refreshToken: string,
   ): Promise<AuthTokens> {
     const accessToken =
       await createAccessToken({
         sub: userId,
         role,
+        sessionId,
       });
-
-    const refreshToken =
-      createRefreshToken();
-
-    await this.sessions.create(
-      userId,
-
-      hashRefreshToken(
-        refreshToken,
-      ),
-
-      getRefreshExpiration(),
-    );
 
     return {
       accessToken,
       refreshToken,
       accessTokenExpiresIn:
-        15 * 60,
+        ACCESS_TOKEN_TTL_SECONDS,
     };
   }
 }

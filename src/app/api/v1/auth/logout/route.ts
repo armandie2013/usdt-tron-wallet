@@ -21,10 +21,24 @@ const authService =
 export async function POST(
   request: NextRequest,
 ) {
+  const body =
+    await request
+      .json()
+      .catch(() => ({})) as {
+        refreshToken?: unknown;
+      };
+
+  const bodyRefreshToken =
+    typeof body.refreshToken ===
+    "string"
+      ? body.refreshToken
+      : undefined;
+
   const refreshToken =
     request.cookies.get(
       REFRESH_TOKEN_COOKIE,
-    )?.value;
+    )?.value ??
+    bodyRefreshToken;
 
   await authService.logout(
     refreshToken,

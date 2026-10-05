@@ -54,6 +54,11 @@ export const loginSchema = z.object({
       "mobile",
     ])
     .default("web"),
+
+  refreshToken: z
+    .string()
+    .min(1)
+    .optional(),
 });
 
 export const refreshSchema = z.object({

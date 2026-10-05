@@ -17,8 +17,13 @@ import type {
 
 import {
   ACCESS_TOKEN_COOKIE,
+  getSessionExpiration,
   verifyAccessToken,
 } from "./auth.tokens";
+
+import {
+  AuthSessionRepository,
+} from "./auth.session.repository";
 
 import {
   UserService,
@@ -91,6 +96,20 @@ export async function getCurrentUser():
       await verifyAccessToken(
         token,
       );
+
+    const sessions =
+      new AuthSessionRepository();
+
+    const sessionActive =
+      await sessions.touchActive(
+        payload.sessionId,
+        payload.sub,
+        getSessionExpiration(),
+      );
+
+    if (!sessionActive) {
+      return null;
+    }
 
     const repository =
       new UserRepository();

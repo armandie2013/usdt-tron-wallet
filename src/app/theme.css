@@ -153,7 +153,7 @@ html[data-theme="light"] {
    */
 
   --app-warning:
-    #b8740d;
+    #875000;
 
   --app-warning-soft:
     rgba(
@@ -645,6 +645,55 @@ html[data-theme="light"]
 [class*="bg-emerald-400/10"] {
   background-color:
     var(--app-success-soft) !important;
+}
+
+
+/*
+ * ============================================================
+ * WARNING
+ * ============================================================
+ *
+ * Los amarillos pensados para el tema oscuro pierden contraste
+ * sobre fondos claros. En modo claro los convertimos a un ámbar
+ * más oscuro y a una superficie cálida pero legible.
+ */
+
+html[data-theme="light"]
+.wallet-app
+[class*="text-amber-100"],
+html[data-theme="light"]
+.wallet-app
+[class*="text-amber-200"],
+html[data-theme="light"]
+.wallet-app
+[class*="text-amber-300"],
+html[data-theme="light"]
+.wallet-app
+[class*="text-amber-400"] {
+  color:
+    var(--app-warning) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+[class*="bg-amber-950"],
+html[data-theme="light"]
+.wallet-app
+[class*="bg-amber-400/10"] {
+  background-color:
+    var(--app-warning-soft) !important;
+}
+
+html[data-theme="light"]
+.wallet-app
+[class*="border-amber-400"] {
+  border-color:
+    rgba(
+      135,
+      80,
+      0,
+      0.30
+    ) !important;
 }
 
 

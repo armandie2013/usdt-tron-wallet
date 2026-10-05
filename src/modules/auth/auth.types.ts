@@ -37,5 +37,6 @@ export interface LoginResult
 export interface AccessTokenPayload {
   sub: string;
   role: UserRole;
+  sessionId: string;
   type: "access";
 }

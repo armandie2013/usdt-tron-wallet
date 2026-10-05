@@ -11,6 +11,8 @@ import WalletHeaderThemeToggle from "@/components/theme/WalletHeaderThemeToggle"
 
 import WalletNavigationEnhancer from "@/components/wallet/WalletNavigationEnhancer";
 
+import SessionActivityMonitor from "@/components/auth/SessionActivityMonitor";
+
 export const metadata:
   Metadata = {
   title: {
@@ -110,6 +112,8 @@ export default function RootLayout({
           <WalletHeaderThemeToggle />
 
           <WalletNavigationEnhancer />
+
+          <SessionActivityMonitor />
         </ThemeProvider>
       </body>
     </html>

@@ -11,6 +11,8 @@ import {
   useRouter,
 } from "next/navigation";
 
+import AppModal from "@/components/ui/AppModal";
+
 interface LoginResponse {
   success: boolean;
   message?: string;
@@ -43,6 +45,13 @@ export default function LoginPage() {
     null,
   );
 
+  const [
+    activeSession,
+    setActiveSession,
+  ] = useState(
+    false,
+  );
+
   async function handleSubmit(
     event:
       FormEvent<HTMLFormElement>,
@@ -50,6 +59,7 @@ export default function LoginPage() {
     event.preventDefault();
 
     setError(null);
+    setActiveSession(false);
     setLoading(true);
 
     try {
@@ -78,6 +88,19 @@ export default function LoginPage() {
           LoginResponse;
 
       if (!response.ok) {
+        if (
+          data.error ===
+            "SESSION_ALREADY_ACTIVE"
+        ) {
+          setActiveSession(
+            true,
+          );
+
+          setPassword("");
+
+          return;
+        }
+
         setError(
           data.message ??
             "No se pudo iniciar sesión.",
@@ -106,101 +129,119 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="mb-7">
-          <h1 className="text-2xl font-semibold text-slate-900">
-            Iniciar sesión
-          </h1>
+    <>
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="mb-7">
+            <h1 className="text-2xl font-semibold text-slate-900">
+              Iniciar sesión
+            </h1>
 
-          <p className="mt-2 text-sm text-slate-500">
-            Ingresá a tu billetera USDT.
+            <p className="mt-2 text-sm text-slate-500">
+              Ingresá a tu billetera USDT.
+            </p>
+          </div>
+
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-5"
+          >
+            <div>
+              <label
+                htmlFor="email"
+                className="mb-2 block text-sm text-slate-700"
+              >
+                Correo electrónico
+              </label>
+
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) =>
+                  setEmail(
+                    event.target.value,
+                  )
+                }
+                required
+                disabled={loading}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="password"
+                className="mb-2 block text-sm text-slate-700"
+              >
+                Contraseña
+              </label>
+
+              <input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) =>
+                  setPassword(
+                    event.target.value,
+                  )
+                }
+                required
+                disabled={loading}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+              />
+            </div>
+
+            {error && (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700"
+              >
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm text-white transition hover:bg-slate-800 disabled:opacity-60"
+            >
+              {loading
+                ? "Ingresando..."
+                : "Ingresar"}
+            </button>
+          </form>
+
+          <p className="mt-6 text-center text-sm text-slate-500">
+            ¿No tenés cuenta?{" "}
+
+            <Link
+              href="/register"
+              className="text-slate-900 hover:underline"
+            >
+              Crear cuenta
+            </Link>
           </p>
         </div>
+      </main>
 
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-5"
-        >
-          <div>
-            <label
-              htmlFor="email"
-              className="mb-2 block text-sm text-slate-700"
-            >
-              Correo electrónico
-            </label>
-
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) =>
-                setEmail(
-                  event.target.value,
-                )
-              }
-              required
-              disabled={loading}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="password"
-              className="mb-2 block text-sm text-slate-700"
-            >
-              Contraseña
-            </label>
-
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) =>
-                setPassword(
-                  event.target.value,
-                )
-              }
-              required
-              disabled={loading}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-            />
-          </div>
-
-          {error && (
-            <div
-              role="alert"
-              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700"
-            >
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm text-white transition hover:bg-slate-800 disabled:opacity-60"
-          >
-            {loading
-              ? "Ingresando..."
-              : "Ingresar"}
-          </button>
-        </form>
-
-        <p className="mt-6 text-center text-sm text-slate-500">
-          ¿No tenés cuenta?{" "}
-
-          <Link
-            href="/register"
-            className="text-slate-900 hover:underline"
-          >
-            Crear cuenta
-          </Link>
-        </p>
-      </div>
-    </main>
+      <AppModal
+        open={
+          activeSession
+        }
+        title="Sesión abierta en otro dispositivo"
+        message="Esta cuenta ya tiene una sesión activa. Por seguridad, no es posible abrirla simultáneamente en otro dispositivo. Cerrá la sesión en el dispositivo donde está abierta o intentá nuevamente más tarde."
+        variant="warning"
+        confirmLabel="Entendido"
+        closeOnBackdrop={false}
+        onClose={() => {
+          setActiveSession(
+            false,
+          );
+        }}
+      />
+    </>
   );
 }

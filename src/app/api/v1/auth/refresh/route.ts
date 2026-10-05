@@ -15,7 +15,7 @@ import {
   ACCESS_TOKEN_COOKIE,
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_COOKIE,
-  REFRESH_TOKEN_TTL_DAYS,
+  REFRESH_TOKEN_TTL_SECONDS,
 } from "@/modules/auth/auth.tokens";
 
 import {
@@ -129,10 +129,7 @@ export async function POST(
         sameSite: "lax",
         path: "/",
         maxAge:
-          REFRESH_TOKEN_TTL_DAYS *
-          24 *
-          60 *
-          60,
+          REFRESH_TOKEN_TTL_SECONDS,
       },
     );
 
